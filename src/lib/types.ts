@@ -17,6 +17,46 @@ export interface Settings {
   computer_model: string;
   computer_use_enabled: boolean;
   terminal_enabled: boolean;
+  wake_word_enabled: boolean;
+  wake_word_phrase: string;
+  hotkey_enabled: boolean;
+  hotkey: string;
+  cli_enabled: boolean;
+  cli_default: string;
+  cli_notes: string;
+  memory_enabled: boolean;
+  memory_model: string;
+  session_retention_days: number;
+  vad_threshold: number;
+}
+
+
+/** Skill-Metadaten für die Progressive Disclosure (Name + Beschreibung). */
+export interface SkillInfo {
+  name: string;
+  description: string;
+}
+
+/** Treffer der FTS5-Volltextsuche über alte Gespräche. */
+export interface SessionSearchHit {
+  session_id: number;
+  started_ms: number;
+  role: string;
+  snippet: string;
+}
+
+/** Noch nicht in die Tagesnotizen extrahierte Session (Catch-up-Flush). */
+export interface UnprocessedSession {
+  id: number;
+  started_ms: number;
+  transcript: string;
+}
+
+/** Laufender Hintergrund-Job (delegate_task an Codex/Claude CLI). */
+export interface CliJob {
+  id: string;
+  agent: string;
+  task: string;
 }
 
 export type ArtifactKind = "markdown" | "code" | "html" | "search" | "image";
@@ -39,6 +79,12 @@ export interface ImageState {
   url?: string;
   meta?: ImageMeta;
   error?: string;
+  /**
+   * Angeforderte Pixelmaße ("1536x1024") — schon während der Generierung
+   * gesetzt, damit Quick Look das Fenster in der echten Aspect Ratio
+   * aufziehen kann, bevor das Bild fertig ist.
+   */
+  size?: string;
 }
 
 export interface SearchResult {

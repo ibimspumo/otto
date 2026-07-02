@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { AudioEngine } from "./lib/audio";
-import { enterMiniMode, exitMiniMode } from "./lib/miniMode";
+import {
+  hideDrops,
+  hideIsland,
+  showDrops,
+  showIsland,
+  showSettings,
+  toggleIsland,
+} from "./lib/hudWindow";
+import { flushSession, MEMORY_BUDGET_CHARS, runDreaming } from "./lib/memory";
 import { checkForUpdate, installAndRelaunch, type Update } from "./lib/updater";
 import {
   editImages,
+  fetchImageModels,
+  findImageModels,
   generateImage,
   generateImagesOpenRouter,
   isOpenAiImageModel,
@@ -21,61 +32,13 @@ import type {
   AgentState,
   Artifact,
   ArtifactKind,
+  CliJob,
   ImageMeta,
   ImageState,
   Settings,
   TranscriptItem,
 } from "./lib/types";
-import VoicePanel from "./components/VoicePanel";
-import ArtifactPanel from "./components/ArtifactPanel";
-import FilesPanel from "./components/FilesPanel";
-import SettingsPanel from "./components/SettingsPanel";
-
-type View = "talk" | "files" | "settings";
-
-const NAV: { view: View; label: string; icon: React.ReactNode }[] = [
-  {
-    view: "talk",
-    label: "Sprechen",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2a10 10 0 0 1 10 10" opacity="0.5" />
-        <path d="M12 22A10 10 0 0 1 2 12" opacity="0.5" />
-      </svg>
-    ),
-  },
-  {
-    view: "files",
-    label: "Dateien",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M6 2h9l4 4v16H6z" />
-        <path d="M9 11h7M9 15h7" opacity="0.6" />
-      </svg>
-    ),
-  },
-  {
-    view: "settings",
-    label: "Einstellungen",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M4 8h10M18 8h2M4 16h2M10 16h10" />
-        <circle cx="16" cy="8" r="2" />
-        <circle cx="8" cy="16" r="2" />
-      </svg>
-    ),
-  },
-];
-
-const STATE_LABEL: Record<AgentState, string> = {
-  disconnected: "OFFLINE",
-  connecting: "VERBINDE…",
-  idle: "ONLINE",
-  listening: "ONLINE",
-  thinking: "ONLINE",
-  speaking: "ONLINE",
-};
+import Island from "./components/Island";
 
 /** Grobes Seitenverhältnis aus "1536x1024" ableiten. */
 function aspectFromSize(size: string): Aspect {
@@ -88,18 +51,22 @@ function aspectFromSize(size: string): Aspect {
 }
 
 export default function App() {
-  const [view, setView] = useState<View>("talk");
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
-  const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sessionStart, setSessionStart] = useState<number | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
 
   const [artifactStyle, setArtifactStyle] = useState("");
-  const [artifactsVisible, setArtifactsVisible] = useState(false);
+  // Das Drop-Fenster ist ein eigenes Fenster; hier lebt nur die Steuerung.
+  // Ergebnisse erscheinen als Drop-Stapel unten links; die Quick-Look-
+  // Vergrößerung orchestriert das Panel-Fenster selbst.
+  const [panelOpen, setPanelOpen] = useState(false);
   const [activities, setActivities] = useState<string[]>([]);
+  const [jobs, setJobs] = useState<CliJob[]>([]);
+  const jobsRef = useRef<CliJob[]>([]);
+  // Job-Ergebnisse, die fertig wurden, während keine Session lief.
+  const pendingJobResults = useRef<string[]>([]);
   const [images, setImages] = useState<Record<string, ImageState>>({});
   const imagesRef = useRef<Record<string, ImageState>>({});
   const [update, setUpdate] = useState<Update | null>(null);
@@ -109,6 +76,15 @@ export default function App() {
   useEffect(() => {
     checkForUpdate().then(setUpdate);
   }, []);
+
+  // Angezeigte Fehler: mitloggen und nach 10 s von selbst ausblenden —
+  // nichts bleibt dauerhaft in der Insel kleben.
+  useEffect(() => {
+    if (!error) return;
+    void api.logLine(`ui: ${error}`);
+    const t = setTimeout(() => setError(null), 10_000);
+    return () => clearTimeout(t);
+  }, [error]);
 
   async function startUpdate() {
     if (!update || updateProgress !== null) return;
@@ -120,10 +96,46 @@ export default function App() {
       setError(`Update fehlgeschlagen: ${String(e)}`);
     }
   }
-  const artifactsVisibleRef = useRef(false);
+  const panelOpenRef = useRef(false);
+  const activeArtifactIdRef = useRef<string | null>(null);
+  const artifactStyleRef = useRef("");
   useEffect(() => {
-    artifactsVisibleRef.current = artifactsVisible;
-  }, [artifactsVisible]);
+    panelOpenRef.current = panelOpen;
+    activeArtifactIdRef.current = activeArtifactId;
+    artifactStyleRef.current = artifactStyle;
+  }, [panelOpen, activeArtifactId, artifactStyle]);
+
+  /**
+   * Otto zeigt etwas: Der Drop-Stapel erscheint unten links — unaufdringlich,
+   * ohne Fokus-Klau, wie ein Screenshot-Thumbnail. Nie als aufspringendes
+   * Programmfenster.
+   */
+  const openArtifacts = useCallback(() => {
+    setPanelOpen(true);
+  }, []);
+
+  const closeArtifactsPanel = useCallback(() => {
+    setPanelOpen(false);
+  }, []);
+
+  // Quick Look per Stimme: wirkt exakt wie ein Klick auf den Drop.
+  // War das Fenster zu, wird der Wunsch vorgemerkt und nach dem
+  // panel-open-Event eingelöst (sonst würde der fresh-Reset ihn schlucken).
+  const pendingPresent = useRef<{ mode: "gross" | "klein"; id?: string } | null>(
+    null,
+  );
+  const presentArtifact = useCallback((mode: "gross" | "klein", id?: string) => {
+    if (mode === "klein") {
+      void emit("panel-present", { mode });
+      return;
+    }
+    if (panelOpenRef.current) {
+      void emit("panel-present", { mode, id });
+    } else {
+      pendingPresent.current = { mode, id };
+      setPanelOpen(true);
+    }
+  }, []);
 
   const levels = useRef({ inp: 0, out: 0 });
   const engineRef = useRef<AudioEngine | null>(null);
@@ -140,10 +152,40 @@ export default function App() {
     toolRunning: false,
   });
 
+  // Persistente Gesprächsprotokolle: id der laufenden SQLite-Session und
+  // die finalen Transkript-Items für den Memory-Flush beim Trennen.
+  const sessionIdRef = useRef<number | null>(null);
+  const sessionItemsRef = useRef<TranscriptItem[]>([]);
+  const dreamedRef = useRef(false);
+
   useEffect(() => {
-    api.getSettings().then(setSettings).catch(() => {});
+    api
+      .getSettings()
+      .then((s) => {
+        setSettings(s);
+        // Erststart ohne Key: direkt das Einstellungsfenster öffnen.
+        if (!s.openai_api_key.trim()) {
+          void showSettings("keys");
+        }
+      })
+      .catch(() => {});
     reloadArtifactStyle();
   }, []);
+
+  // „Dreaming“: einmal pro App-Start im Hintergrund verpasste Memory-
+  // Flushes nachholen, fällige Konsolidierung fahren und aufräumen.
+  useEffect(() => {
+    if (!settings || dreamedRef.current) return;
+    dreamedRef.current = true;
+    void runDreaming(settings, pushActivity)
+      .then((r) => {
+        if (r.flushed > 0 || r.consolidated) {
+          pushActivity("Gedächtnis auf Stand gebracht");
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
 
   function reloadArtifactStyle() {
     api
@@ -155,6 +197,23 @@ export default function App() {
   const pushActivity = useCallback((text: string) => {
     setActivities((prev) => [text, ...prev].slice(0, 4));
   }, []);
+
+  const commitJobs = useCallback((next: CliJob[]) => {
+    jobsRef.current = next;
+    setJobs(next);
+  }, []);
+
+  const cancelJob = useCallback(
+    async (id: string) => {
+      try {
+        await api.cliJobCancel(id);
+        pushActivity(id === "all" ? "bricht alle Jobs ab" : `bricht ${id} ab`);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [pushActivity],
+  );
 
   const setImage = useCallback((id: string, patch: Partial<ImageState>) => {
     setImages((prev) => {
@@ -217,15 +276,21 @@ export default function App() {
     [setImage],
   );
 
-  // Mini-Orb-Fenster über Zustandswechsel auf dem Laufenden halten.
-  useEffect(() => {
-    void emit("otto-activity", { state: agentState });
-  }, [agentState]);
-
   // Computer-Use-Schritte aus Rust in die Aktivitätsanzeige spiegeln.
   useEffect(() => {
     const un = listen<{ text: string }>("cu-status", (e) =>
       pushActivity(e.payload.text),
+    );
+    return () => {
+      un.then((f) => f());
+    };
+  }, [pushActivity]);
+
+  // Live-Output laufender Hintergrund-Jobs (delegate_task) anzeigen.
+  useEffect(() => {
+    const un = listen<{ job_id: string; agent: string; line: string }>(
+      "cli-line",
+      (e) => pushActivity(`${e.payload.agent}: ${e.payload.line.slice(0, 90)}`),
     );
     return () => {
       un.then((f) => f());
@@ -258,38 +323,48 @@ export default function App() {
     setAgentState(next);
   }, []);
 
-  // ----------------------------------------------------------------
-  // Transkript
-  // ----------------------------------------------------------------
-
-  const pushUser = useCallback((text: string) => {
-    if (!text) return;
-    const id = `u${++seq.current}`;
-    setTranscript((prev) => [...prev.slice(-60), { id, role: "user", text, final: true }]);
-  }, []);
-
-  const upsertAssistant = useCallback(
-    (itemId: string, delta: string | null, finalText: string | null) => {
-      const id = `as-${itemId}`;
-      setTranscript((prev) => {
-        const idx = prev.findIndex((t) => t.id === id);
-        if (idx === -1) {
-          return [
-            ...prev.slice(-60),
-            { id, role: "assistant" as const, text: finalText ?? delta ?? "", final: finalText !== null },
-          ];
-        }
-        const next = [...prev];
-        next[idx] = {
-          ...next[idx],
-          text: finalText !== null ? finalText : next[idx].text + (delta ?? ""),
-          final: finalText !== null,
-        };
-        return next;
-      });
-    },
-    [],
-  );
+  // Fertige Jobs: Ergebnis in die Realtime-Session injizieren, damit Otto
+  // von selbst berichtet. Ohne laufende Session wird es für die nächste
+  // Verbindung vorgemerkt.
+  useEffect(() => {
+    const un = listen<{
+      job_id: string;
+      agent: string;
+      task: string;
+      exit_code: number | null;
+      output: string;
+      stderr: string;
+      cancelled: boolean;
+    }>("cli-done", (e) => {
+      const p = e.payload;
+      commitJobs(jobsRef.current.filter((j) => j.id !== p.job_id));
+      if (p.cancelled) {
+        pushActivity(`${p.agent}-Job abgebrochen (${p.job_id})`);
+        return;
+      }
+      const failed = p.exit_code !== 0;
+      pushActivity(
+        failed
+          ? `${p.agent}-Job fehlgeschlagen (${p.job_id})`
+          : `${p.agent}-Job fertig (${p.job_id})`,
+      );
+      const message =
+        `[Hintergrund-Job ${p.job_id} (${p.agent}) ist fertig — Exit-Code ${p.exit_code ?? "?"}.` +
+        ` Aufgabe war: ${p.task.slice(0, 300)}]\n` +
+        `Ausgabe:\n${p.output.trim() || "(leer)"}` +
+        (failed && p.stderr.trim() ? `\nFehlerausgabe:\n${p.stderr.trim()}` : "") +
+        `\nBerichte dem Nutzer jetzt knapp mündlich das Ergebnis; Details kannst du als Artefakt zeigen.`;
+      if (clientRef.current?.connected) {
+        clientRef.current.sendSystemMessage(message);
+        requestResponse();
+      } else {
+        pendingJobResults.current.push(message);
+      }
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [commitJobs, pushActivity, requestResponse]);
 
   // ----------------------------------------------------------------
   // Artefakte
@@ -308,10 +383,11 @@ export default function App() {
         [...artifactsRef.current, { ...partial, id, updatedAt: Date.now() }],
         id,
       );
-      setArtifactsVisible(true);
+      // Otto zeigt etwas: das Panel-Fenster öffnet sich von selbst.
+      openArtifacts();
       return id;
     },
-    [commitArtifacts],
+    [commitArtifacts, openArtifacts],
   );
 
   const closeArtifact = useCallback(
@@ -323,10 +399,10 @@ export default function App() {
       setActiveArtifactId((prev) =>
         prev === id ? (next[next.length - 1]?.id ?? null) : prev,
       );
-      if (next.length === 0) setArtifactsVisible(false);
+      if (next.length === 0) closeArtifactsPanel();
       return true;
     },
-    [commitArtifacts],
+    [closeArtifactsPanel, commitArtifacts],
   );
 
   const removeImageEverywhere = useCallback(
@@ -350,9 +426,9 @@ export default function App() {
           ? prev
           : (nextArts[nextArts.length - 1]?.id ?? null),
       );
-      if (nextArts.length === 0) setArtifactsVisible(false);
+      if (nextArts.length === 0) closeArtifactsPanel();
     },
-    [commitArtifacts],
+    [closeArtifactsPanel, commitArtifacts],
   );
 
   const handleImageAction = useCallback(
@@ -402,8 +478,35 @@ export default function App() {
               language: args.language ? String(args.language) : undefined,
               content: String(args.content ?? ""),
             });
+            if (args.present) presentArtifact("gross", id);
             pushActivity(`erstellt Artefakt „${title}“`);
             out = { ok: true, id, note: "Artefakt wird angezeigt." };
+            break;
+          }
+          case "present_artifact": {
+            const mode = args.mode === "klein" ? "klein" : "gross";
+            const id = args.id ? String(args.id) : undefined;
+            if (id && !artifactsRef.current.some((a) => a.id === id)) {
+              out = {
+                ok: false,
+                error: `Artefakt ${id} nicht gefunden.`,
+                offene_artefakte: artifactsRef.current.map((a) => ({
+                  id: a.id,
+                  titel: a.title,
+                  typ: a.kind,
+                })),
+              };
+              break;
+            }
+            if (mode === "gross" && artifactsRef.current.length === 0) {
+              out = { ok: false, error: "Es gibt gerade keine Artefakte." };
+              break;
+            }
+            presentArtifact(mode, id);
+            pushActivity(
+              mode === "gross" ? "öffnet die Großansicht" : "verkleinert die Ansicht",
+            );
+            out = { ok: true };
             break;
           }
           case "update_artifact": {
@@ -422,7 +525,7 @@ export default function App() {
                 updatedAt: Date.now(),
               };
               commitArtifacts(next, next[idx].id);
-              setArtifactsVisible(true);
+              openArtifacts();
               pushActivity(`aktualisiert „${next[idx].title}“`);
               out = { ok: true, id: next[idx].id };
             }
@@ -456,7 +559,11 @@ export default function App() {
           }
           case "toggle_artifact_panel": {
             const visible = Boolean(args.visible);
-            setArtifactsVisible(visible);
+            if (visible) {
+              openArtifacts();
+            } else {
+              setPanelOpen(false);
+            }
             pushActivity(visible ? "öffnet das Artefakt-Panel" : "schließt das Artefakt-Panel");
             out = { ok: true };
             break;
@@ -466,7 +573,7 @@ export default function App() {
             if (id === "all") {
               commitArtifacts([]);
               setActiveArtifactId(null);
-              setArtifactsVisible(false);
+              closeArtifactsPanel();
               pushActivity("schließt alle Artefakte");
               out = { ok: true };
             } else if (closeArtifact(id)) {
@@ -488,7 +595,7 @@ export default function App() {
           case "list_artifacts": {
             out = {
               ok: true,
-              sichtbar: artifactsVisibleRef.current,
+              sichtbar: panelOpenRef.current,
               artefakte: artifactsRef.current.map((a) => ({
                 id: a.id,
                 titel: a.title,
@@ -512,11 +619,28 @@ export default function App() {
             }
             pushActivity(`Terminal: ${command.slice(0, 60)}${command.length > 60 ? "…" : ""}`);
             try {
-              const res = await api.runTerminal(
-                command,
-                typeof args.timeout_s === "number" ? args.timeout_s : undefined,
-              );
-              out = { ok: true, ...res };
+              if (args.background) {
+                // Non-blocking: als Hintergrund-Job über die Job-
+                // Infrastruktur — Otto bleibt sofort ansprechbar.
+                const jobId = await api.cliJobStart("shell", command);
+                commitJobs([
+                  ...jobsRef.current,
+                  { id: jobId, agent: "shell", task: command },
+                ]);
+                out = {
+                  ok: true,
+                  job_id: jobId,
+                  status: "gestartet",
+                  hinweis:
+                    "Befehl läuft im Hintergrund — das Ergebnis kommt automatisch als Systemnachricht. Abbrechen mit cancel_job.",
+                };
+              } else {
+                const res = await api.runTerminal(
+                  command,
+                  typeof args.timeout_s === "number" ? args.timeout_s : undefined,
+                );
+                out = { ok: true, ...res };
+              }
             } catch (e) {
               out = { ok: false, error: String(e) };
             }
@@ -533,7 +657,8 @@ export default function App() {
             const key = settingsRefValue.current?.openai_api_key?.trim() ?? "";
             const task = String(args.task ?? "");
             pushActivity(`übernimmt den Computer: ${task.slice(0, 60)}${task.length > 60 ? "…" : ""}`);
-            await enterMiniMode();
+            // Die Insel bleibt sichtbar — sie zeigt die CU-Schritte als
+            // Caption, ein eigenes Mini-Fenster braucht es nicht mehr.
             try {
               const result = await api.runComputerUse(
                 task,
@@ -544,8 +669,64 @@ export default function App() {
             } catch (e) {
               setError(String(e));
               out = { ok: false, error: String(e) };
-            } finally {
-              await exitMiniMode();
+            }
+            break;
+          }
+          case "delegate_task": {
+            const s = settingsRefValue.current;
+            if (!s?.cli_enabled) {
+              out = {
+                ok: false,
+                error: "Delegation ist in den Einstellungen deaktiviert.",
+              };
+              break;
+            }
+            const agent =
+              args.agent === "codex" || args.agent === "claude"
+                ? args.agent
+                : s.cli_default?.trim() || "codex";
+            const task = String(args.task ?? "").trim();
+            if (!task) {
+              out = { ok: false, error: "Leere Aufgabe." };
+              break;
+            }
+            try {
+              const jobId = await api.cliJobStart(
+                agent,
+                task,
+                args.cwd ? String(args.cwd) : undefined,
+              );
+              commitJobs([...jobsRef.current, { id: jobId, agent, task }]);
+              pushActivity(
+                `delegiert an ${agent}: ${task.slice(0, 56)}${task.length > 56 ? "…" : ""}`,
+              );
+              out = {
+                ok: true,
+                job_id: jobId,
+                agent,
+                status: "gestartet",
+                hinweis:
+                  "Läuft im Hintergrund — du bleibst ansprechbar. Das Ergebnis kommt automatisch als Systemnachricht; sag dem Nutzer nur kurz Bescheid.",
+              };
+            } catch (e) {
+              out = { ok: false, error: String(e) };
+            }
+            break;
+          }
+          case "cancel_job": {
+            const id = String(args.job_id ?? "").trim();
+            if (!id) {
+              out = { ok: false, error: "Keine job_id angegeben." };
+              break;
+            }
+            try {
+              const stopped = await api.cliJobCancel(id);
+              pushActivity(
+                id === "all" ? "bricht alle Jobs ab" : `bricht ${id} ab`,
+              );
+              out = { ok: true, abgebrochen: stopped };
+            } catch (e) {
+              out = { ok: false, error: String(e) };
             }
             break;
           }
@@ -553,7 +734,10 @@ export default function App() {
             const s = settingsRefValue.current;
             const transparentWanted = Boolean(args.transparent);
             // Transparenz beherrscht nur gpt-image-1 → bei Bedarf umschalten.
-            let model = s?.image_model?.trim() || "gpt-image-2";
+            let model =
+              String(args.model ?? "").trim() ||
+              s?.image_model?.trim() ||
+              "gpt-image-2";
             let modelNote: string | undefined;
             if (transparentWanted && model !== "gpt-image-1") {
               model = "gpt-image-1";
@@ -595,8 +779,11 @@ export default function App() {
               `generiert ${n > 1 ? `${n} Bilder` : "ein Bild"}: „${prompt.slice(0, 48)}“`,
             );
 
+            const size = resolveSize(aspect, resolution);
             const ids = Array.from({ length: n }, () => newImageId());
-            ids.forEach((id) => setImage(id, { status: "generating" }));
+            // size sofort mitgeben: Quick Look kennt so die Aspect Ratio,
+            // bevor das erste Pixel da ist.
+            ids.forEach((id) => setImage(id, { status: "generating", size }));
             addArtifact({
               title: baseName,
               kind: "image",
@@ -604,7 +791,6 @@ export default function App() {
               imageIds: ids,
             });
 
-            const size = resolveSize(aspect, resolution);
             const storeOne = async (id: string, i: number, b64: string) => {
               const meta = await api.imageStore(
                 id,
@@ -614,9 +800,11 @@ export default function App() {
                 transparent,
                 size,
               );
+              // Nach dem Speichern die leichte asset://-URL statt der
+              // Daten-URL verwenden — hält die Panel-Synchronisierung schlank.
               setImage(id, {
                 status: "done",
-                url: `data:image/png;base64,${b64}`,
+                url: convertFileSrc(meta.path),
                 meta,
               });
             };
@@ -685,7 +873,10 @@ export default function App() {
           }
           case "edit_image": {
             const s = settingsRefValue.current;
-            const model = s?.image_model?.trim() || "gpt-image-2";
+            const model =
+              String(args.model ?? "").trim() ||
+              s?.image_model?.trim() ||
+              "gpt-image-2";
             const useOpenAi = isOpenAiImageModel(model);
             const key = useOpenAi
               ? (s?.openai_api_key?.trim() ?? "")
@@ -728,7 +919,9 @@ export default function App() {
             pushActivity(`bearbeitet „${base.name}“: ${prompt.slice(0, 48)}`);
 
             const ids = Array.from({ length: n }, () => newImageId());
-            ids.forEach((id) => setImage(id, { status: "generating" }));
+            ids.forEach((id) =>
+              setImage(id, { status: "generating", size: size ?? base.size }),
+            );
             addArtifact({
               title: baseName,
               kind: "image",
@@ -778,7 +971,7 @@ export default function App() {
                   );
                   setImage(id, {
                     status: "done",
-                    url: `data:image/png;base64,${b64}`,
+                    url: convertFileSrc(meta.path),
                     meta,
                   });
                   return { id, ok: true };
@@ -815,12 +1008,14 @@ export default function App() {
                 meta,
               });
             }
-            addArtifact({
+            const artifactId = addArtifact({
               title: meta.name,
               kind: "image",
               content: meta.prompt,
               imageIds: [meta.id],
             });
+            // „Öffne das Bild“ heißt: direkt groß, nicht erst als Drop.
+            presentArtifact("gross", artifactId);
             pushActivity(`öffnet Bild „${meta.name}“`);
             out = { ok: true, id: meta.id };
             break;
@@ -879,6 +1074,7 @@ export default function App() {
             const existing = artifactsRef.current.find(
               (a) => a.kind === "image" && a.title === "Galerie",
             );
+            let galleryId: string;
             if (existing) {
               const next = artifactsRef.current.map((a) =>
                 a.id === existing.id
@@ -886,15 +1082,18 @@ export default function App() {
                   : a,
               );
               commitArtifacts(next, existing.id);
-              setArtifactsVisible(true);
+              openArtifacts();
+              galleryId = existing.id;
             } else {
-              addArtifact({
+              galleryId = addArtifact({
                 title: "Galerie",
                 kind: "image",
                 content: "Alle gespeicherten Bilder",
                 imageIds: ids,
               });
             }
+            // Die Galerie will man durchsehen — direkt groß öffnen.
+            presentArtifact("gross", galleryId);
             pushActivity(`zeigt die Bildbibliothek (${list.length} Bilder)`);
             out = { ok: true, anzahl: list.length };
             break;
@@ -981,9 +1180,115 @@ export default function App() {
             const current = await api.readAgentFile("MEMORY.md");
             const date = new Date().toISOString().slice(0, 10);
             const next = `${current.replace(/\s+$/, "")}\n- [${date}] ${note}\n`;
+            // Hartes Budget gegen Memory-Bloat: bei Überlauf muss Otto
+            // erst konsolidieren (rewrite_memory), statt anzuhängen.
+            if (next.length > MEMORY_BUDGET_CHARS) {
+              out = {
+                ok: false,
+                error: `MEMORY.md ist voll (Budget ${MEMORY_BUDGET_CHARS} Zeichen). Konsolidiere zuerst mit rewrite_memory: fasse überlappende Einträge zusammen, entferne Veraltetes — und nimm die neue Notiz dabei gleich mit auf.`,
+                memory_md: current,
+                neue_notiz: note,
+              };
+              break;
+            }
             await api.writeAgentFile("MEMORY.md", next);
             pushActivity("merkt sich etwas (MEMORY.md)");
             out = { ok: true };
+            break;
+          }
+          case "rewrite_memory": {
+            const content = String(args.content ?? "").trim();
+            if (!content) {
+              out = { ok: false, error: "Leerer Inhalt." };
+              break;
+            }
+            if (content.length > MEMORY_BUDGET_CHARS) {
+              out = {
+                ok: false,
+                error: `Immer noch über dem Budget (${content.length}/${MEMORY_BUDGET_CHARS} Zeichen) — kürze weiter.`,
+              };
+              break;
+            }
+            await api.writeAgentFile("MEMORY.md", `${content}\n`);
+            pushActivity("konsolidiert MEMORY.md");
+            out = { ok: true, zeichen: content.length };
+            break;
+          }
+          case "search_sessions": {
+            const query = String(args.query ?? "").trim();
+            if (!query) {
+              out = { ok: false, error: "Leere Suchanfrage." };
+              break;
+            }
+            pushActivity(`durchsucht alte Gespräche: „${query}“`);
+            const hits = await api.sessionsSearch(
+              query,
+              typeof args.limit === "number" ? args.limit : undefined,
+            );
+            out = {
+              ok: true,
+              treffer: hits.map((h) => ({
+                datum: new Date(h.started_ms).toISOString().slice(0, 10),
+                wer: h.role === "user" ? "nutzer" : "otto",
+                ausschnitt: h.snippet,
+              })),
+              hinweis:
+                hits.length === 0
+                  ? "Keine Treffer — versuche andere Suchbegriffe."
+                  : undefined,
+            };
+            break;
+          }
+          case "read_skill": {
+            const name = String(args.name ?? "").trim();
+            try {
+              const content = await api.skillRead(name);
+              pushActivity(`liest Skill „${name}“`);
+              out = { ok: true, content };
+            } catch (e) {
+              out = { ok: false, error: String(e) };
+            }
+            break;
+          }
+          case "save_skill": {
+            const name = String(args.name ?? "").trim();
+            const content = String(args.content ?? "");
+            try {
+              await api.skillWrite(name, content);
+              pushActivity(`speichert Skill „${name}“`);
+              out = {
+                ok: true,
+                hinweis: "Skill gespeichert — er steht dir ab der nächsten Sitzung in der Skill-Liste zur Verfügung (jetzt schon via read_skill).",
+              };
+            } catch (e) {
+              out = { ok: false, error: String(e) };
+            }
+            break;
+          }
+          case "delete_skill": {
+            const name = String(args.name ?? "").trim();
+            try {
+              await api.skillDelete(name);
+              pushActivity(`löscht Skill „${name}“`);
+              out = { ok: true };
+            } catch (e) {
+              out = { ok: false, error: String(e) };
+            }
+            break;
+          }
+          case "find_image_model": {
+            const query = String(args.query ?? "").trim();
+            const key = settingsRefValue.current?.openrouter_api_key ?? "";
+            const models = await fetchImageModels(key);
+            const hits = findImageModels(models, query);
+            out = {
+              ok: hits.length > 0,
+              modelle: hits.map((m) => ({ id: m.id, name: m.label })),
+              hinweis:
+                hits.length > 0
+                  ? "Übergib die passende id als model an generate_image/edit_image."
+                  : "Kein Modell gefunden — frag den Nutzer oder bleib beim Standard.",
+            };
             break;
           }
           default:
@@ -1001,8 +1306,12 @@ export default function App() {
     [
       addArtifact,
       closeArtifact,
+      closeArtifactsPanel,
       commitArtifacts,
+      commitJobs,
       newImageId,
+      openArtifacts,
+      presentArtifact,
       pushActivity,
       recompute,
       removeImageEverywhere,
@@ -1032,7 +1341,18 @@ export default function App() {
       toolRunning: false,
     };
     levels.current = { inp: 0, out: 0 };
-    setSessionStart(null);
+    // Session abschließen + Memory-Flush im Hintergrund: bleibende
+    // Fakten wandern in die Tagesnotiz, die Session wird als
+    // verarbeitet markiert. Blockiert den Teardown nicht.
+    const sessionId = sessionIdRef.current;
+    const items = sessionItemsRef.current;
+    sessionIdRef.current = null;
+    sessionItemsRef.current = [];
+    if (sessionId !== null) {
+      void api.sessionEnd(sessionId).catch(() => {});
+      const s = settingsRefValue.current;
+      if (s) void flushSession(s, sessionId, items);
+    }
     const engine = engineRef.current;
     engineRef.current = null;
     await engine?.stop().catch(() => {});
@@ -1059,7 +1379,7 @@ export default function App() {
 
     if (!current.openai_api_key.trim()) {
       setError("Kein OpenAI-API-Key hinterlegt — trag ihn in den Einstellungen ein.");
-      setView("settings");
+      void showSettings("keys");
       return;
     }
 
@@ -1086,6 +1406,35 @@ export default function App() {
       const parts = await Promise.all(
         names.map(async (n) => `--- ${n} ---\n${await api.readAgentFile(n)}`),
       );
+      // Tagesnotizen (heute + gestern): rohe Fakten aus jüngsten
+      // Gesprächen — Schicht 1 des Gedächtnisses.
+      let notesInfo = "";
+      if (current.memory_enabled) {
+        try {
+          const notes = await api.memoryNotesRecent(2);
+          if (notes.trim()) {
+            notesInfo = `\n\n--- Tagesnotizen (heute + gestern) ---\n${notes.trim()}`;
+          }
+        } catch {
+          // Ohne Notizen verbinden.
+        }
+      }
+      // Skills: nur Name + Beschreibung (Progressive Disclosure) —
+      // den Body liest Otto bei Bedarf mit read_skill.
+      let skillsInfo = "";
+      try {
+        const skills = await api.skillsList();
+        if (skills.length > 0) {
+          skillsInfo =
+            `\n\n--- Deine Skills ---\n` +
+            skills
+              .map((s) => `- ${s.name}: ${s.description || "(ohne Beschreibung)"}`)
+              .join("\n") +
+            `\nPasst ein Skill zur Aufgabe, lies ihn ZUERST mit read_skill.`;
+        }
+      } catch {
+        // Ohne Skill-Liste verbinden.
+      }
       // Otto soll wissen, dass die persistente Bildbibliothek existiert.
       let galleryInfo = "";
       try {
@@ -1100,13 +1449,48 @@ export default function App() {
       } catch {
         // Ohne Galerie-Info verbinden.
       }
-      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${galleryInfo}`;
+      // Kontext für delegate_task: welche Agenten es gibt und wofür der
+      // Nutzer sie bevorzugt (frei editierbar in den Einstellungen).
+      let cliInfo = "";
+      if (current.cli_enabled) {
+        try {
+          const avail = await api.cliAvailable();
+          const status = [
+            `codex ${avail.codex ? "✓ installiert" : "✗ nicht installiert"}`,
+            `claude ${avail.claude ? "✓ installiert" : "✗ nicht installiert"}`,
+          ].join(", ");
+          cliInfo =
+            `\n\n--- Delegation (delegate_task) ---\nHintergrund-Agenten auf diesem Mac: ${status}. ` +
+            `Standard-Agent: ${current.cli_default?.trim() || "codex"}.`;
+          if (current.cli_notes?.trim()) {
+            cliInfo += `\nHinweise des Nutzers zur Wahl des Agenten: ${current.cli_notes.trim()}`;
+          }
+        } catch {
+          // Ohne Delegations-Info verbinden.
+        }
+      }
+      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${notesInfo}${skillsInfo}${galleryInfo}${cliInfo}`;
 
       const client = new RealtimeClient({
         onOpen: () => {
           flags.current.connecting = false;
           flags.current.connected = true;
-          setSessionStart(Date.now());
+          // Protokoll der neuen Session in SQLite beginnen.
+          sessionItemsRef.current = [];
+          api
+            .sessionStart()
+            .then((id) => {
+              sessionIdRef.current = id;
+            })
+            .catch(() => {});
+          // Ergebnisse von Jobs, die ohne Session fertig wurden, nachreichen.
+          if (pendingJobResults.current.length > 0) {
+            for (const msg of pendingJobResults.current) {
+              clientRef.current?.sendSystemMessage(msg);
+            }
+            pendingJobResults.current = [];
+            requestResponse();
+          }
           recompute();
         },
         onClose: () => {
@@ -1114,6 +1498,9 @@ export default function App() {
           void teardown();
         },
         onError: (msg) => setError(msg),
+        // Technische Server-Fehler: nur ins interne Log (otto.log),
+        // damit sie auswertbar sind, ohne den Nutzer zu behelligen.
+        onLog: (msg) => void api.logLine(`realtime: ${msg}`),
         onAudio: (b64) => {
           engineRef.current?.enqueue(b64);
           if (!flags.current.playing) {
@@ -1146,9 +1533,29 @@ export default function App() {
           }
           recompute();
         },
-        onUserTranscript: pushUser,
-        onAssistantDelta: (itemId, delta) => upsertAssistant(itemId, delta, null),
-        onAssistantDone: (itemId, text) => upsertAssistant(itemId, null, text),
+        // Keine Text-UI mehr — Transkripte fließen nur noch ins
+        // persistente Protokoll (SQLite) und in den Memory-Flush.
+        onUserTranscript: (text) => {
+          if (!text) return;
+          sessionItemsRef.current.push({ id: "", role: "user", text, final: true });
+          const sid = sessionIdRef.current;
+          if (sid !== null) void api.sessionAppend(sid, "user", text).catch(() => {});
+        },
+        onAssistantDelta: () => {},
+        onAssistantDone: (_itemId, text) => {
+          if (text.trim()) {
+            sessionItemsRef.current.push({
+              id: "",
+              role: "assistant",
+              text,
+              final: true,
+            });
+            const sid = sessionIdRef.current;
+            if (sid !== null) {
+              void api.sessionAppend(sid, "assistant", text).catch(() => {});
+            }
+          }
+        },
         onFunctionCall: (call) => void executeTool(call),
       });
       clientRef.current = client;
@@ -1156,6 +1563,11 @@ export default function App() {
       const tools = toolDefs.filter((t: { name?: string }) => {
         if (t.name === "computer_use" && !current.computer_use_enabled) return false;
         if (t.name === "run_terminal" && !current.terminal_enabled) return false;
+        if (
+          (t.name === "delegate_task" || t.name === "cancel_job") &&
+          !current.cli_enabled
+        )
+          return false;
         return true;
       });
       client.connect(current.openai_api_key.trim(), {
@@ -1164,6 +1576,7 @@ export default function App() {
         instructions,
         tools,
         reasoningEffort: current.reasoning_effort,
+        vadThreshold: current.vad_threshold,
       });
     } catch (e) {
       const msg = String(e);
@@ -1174,7 +1587,7 @@ export default function App() {
       );
       await teardown();
     }
-  }, [executeTool, pushUser, recompute, teardown, upsertAssistant]);
+  }, [executeTool, recompute, teardown]);
 
   useEffect(() => {
     return () => {
@@ -1183,81 +1596,242 @@ export default function App() {
     };
   }, []);
 
+  // ----------------------------------------------------------------
+  // Aktivierung: Wake Word („Hey Otto“) & globaler Hotkey
+  // ----------------------------------------------------------------
+
+  // Callbacks werden in Events/Effekten über Refs gelesen, damit keine
+  // veralteten Closures hängen bleiben.
+  const connectRef = useRef(connect);
+  const disconnectRef = useRef(disconnect);
+  useEffect(() => {
+    connectRef.current = connect;
+    disconnectRef.current = disconnect;
+  }, [connect, disconnect]);
+
+  const summonAndConnect = useCallback(async () => {
+    if (flags.current.connected || flags.current.connecting) {
+      await showIsland();
+      return;
+    }
+    await showIsland();
+    void connectRef.current();
+  }, []);
+
+  /** Dismiss: Session beenden, die Insel zieht sich in den Notch zurück. */
+  const dismiss = useCallback(async () => {
+    void disconnectRef.current();
+    await hideIsland();
+  }, []);
+
+  // Wake-Word-Erkennung läuft offline (NSSpeechRecognizer), aber nur solange
+  // keine Session aktiv ist — sonst hört Otto doppelt zu.
+  const wakeActive = agentState === "disconnected";
+  useEffect(() => {
+    const enabled = settings?.wake_word_enabled ?? false;
+    const phrase = settings?.wake_word_phrase?.trim() || "Hey Otto";
+    if (enabled && wakeActive) {
+      api.wakeWordStart([phrase]).catch((e) => {
+        pushActivity(`Wake Word nicht verfügbar: ${String(e).slice(0, 80)}`);
+      });
+    } else {
+      api.wakeWordStop().catch(() => {});
+    }
+    return () => {
+      api.wakeWordStop().catch(() => {});
+    };
+  }, [
+    settings?.wake_word_enabled,
+    settings?.wake_word_phrase,
+    wakeActive,
+    pushActivity,
+  ]);
+
+  useEffect(() => {
+    const un = listen("wake-word", () => {
+      void summonAndConnect();
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [summonAndConnect]);
+
+  // Globaler Hotkey: verbindet (und holt die Insel nach vorn) bzw. trennt.
+  // Spezialfall „2x Cmd“: Modifier-only-Taps kann das Shortcut-Plugin nicht —
+  // dafür läuft ein nativer NSEvent-Monitor in Rust (Event "double-cmd").
+  const isDoubleCmd = (combo: string) =>
+    /^(2x ?cmd|cmd ?cmd|doppel[- ]?cmd|double[- ]?cmd|⌘⌘)$/i.test(combo);
+  useEffect(() => {
+    if (!settings) return;
+    let disposed = false;
+    (async () => {
+      await unregisterAll().catch(() => {});
+      await api.dblcmdStop().catch(() => {});
+      const combo = settings.hotkey?.trim();
+      if (!settings.hotkey_enabled || !combo || disposed) return;
+      if (isDoubleCmd(combo)) {
+        await api.dblcmdStart().catch((e) => {
+          setError(
+            `Doppel-Cmd ließ sich nicht aktivieren: ${String(e)} — braucht die Bedienungshilfen-Freigabe.`,
+          );
+        });
+        return;
+      }
+      try {
+        await register(combo, (event) => {
+          if (event.state !== "Pressed") return;
+          if (flags.current.connected || flags.current.connecting) {
+            void dismiss();
+          } else {
+            void summonAndConnect();
+          }
+        });
+      } catch (e) {
+        setError(`Hotkey „${combo}“ ließ sich nicht registrieren: ${String(e)}`);
+      }
+    })();
+    return () => {
+      disposed = true;
+      void unregisterAll().catch(() => {});
+      void api.dblcmdStop().catch(() => {});
+    };
+  }, [settings, settings?.hotkey, settings?.hotkey_enabled, summonAndConnect, dismiss]);
+
+  // Doppel-Cmd aus dem nativen Monitor: gleiche Wirkung wie der Hotkey.
+  useEffect(() => {
+    const un = listen("double-cmd", () => {
+      if (flags.current.connected || flags.current.connecting) {
+        void dismiss();
+      } else {
+        void summonAndConnect();
+      }
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [dismiss, summonAndConnect]);
+
+  // Tray-Icon: Linksklick toggelt die Insel, Menüpunkte öffnen gezielt.
+  useEffect(() => {
+    const unToggle = listen("tray-toggle", () => {
+      void toggleIsland();
+    });
+    const unConnect = listen("tray-connect", () => {
+      void summonAndConnect();
+    });
+    const unSettings = listen("tray-settings", () => void showSettings("allgemein"));
+    const unFiles = listen("tray-files", () => void showSettings("persona"));
+    return () => {
+      unToggle.then((f) => f());
+      unConnect.then((f) => f());
+      unSettings.then((f) => f());
+      unFiles.then((f) => f());
+    };
+  }, [summonAndConnect]);
+
+  // Escape = Dismiss: Session beenden, Orb verschwindet.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") void dismiss();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dismiss]);
+
+  // ----------------------------------------------------------------
+  // Drop-Fenster: Sichtbarkeit steuern und Zustand hinüberspiegeln
+  // ----------------------------------------------------------------
+
+  const panelWasOpen = useRef(false);
+  useEffect(() => {
+    if (panelOpen) {
+      void showDrops();
+      // fresh = das Fenster war zu: das Panel setzt sich in den
+      // Stapel-Modus zurück, statt eine alte Quick-Look-Ansicht zu zeigen.
+      void emit("panel-open", { fresh: !panelWasOpen.current });
+      // Vorgemerkter Quick-Look-Wunsch (present_artifact bei zuem Fenster):
+      // NACH panel-open senden, damit der fresh-Reset ihn nicht überschreibt.
+      if (pendingPresent.current) {
+        void emit("panel-present", pendingPresent.current);
+        pendingPresent.current = null;
+      }
+    } else {
+      void hideDrops();
+    }
+    panelWasOpen.current = panelOpen;
+  }, [panelOpen]);
+
+  // Artefakte, Bilder und Stil live ans Panel-Fenster spiegeln.
+  useEffect(() => {
+    void emit("panel-state", {
+      artifacts,
+      activeId: activeArtifactId,
+      images,
+      artifactStyle,
+    });
+  }, [artifacts, activeArtifactId, images, artifactStyle]);
+
+  // Aktionen aus dem Panel-Fenster (Tab-Wechsel, Schließen, Bild-Aktionen).
+  useEffect(() => {
+    const unReady = listen("panel-ready", () => {
+      void emit("panel-state", {
+        artifacts: artifactsRef.current,
+        activeId: activeArtifactIdRef.current,
+        images: imagesRef.current,
+        artifactStyle: artifactStyleRef.current,
+      });
+    });
+    const unClose = listen("panel-close", () => setPanelOpen(false));
+    const unAction = listen<{
+      type: "select" | "close" | "image";
+      id?: string;
+      action?: "favorite" | "delete" | "save";
+    }>("panel-action", (e) => {
+      const p = e.payload;
+      if (p.type === "select" && p.id) {
+        setActiveArtifactId(p.id);
+      } else if (p.type === "close" && p.id) {
+        closeArtifact(p.id);
+      } else if (p.type === "image" && p.id && p.action) {
+        void handleImageAction(p.id, p.action);
+      }
+    });
+    const unStyle = listen("style-changed", () => reloadArtifactStyle());
+    const unSettings = listen("settings-changed", () => {
+      api.getSettings().then(setSettings).catch(() => {});
+    });
+    return () => {
+      unReady.then((f) => f());
+      unClose.then((f) => f());
+      unAction.then((f) => f());
+      unStyle.then((f) => f());
+      unSettings.then((f) => f());
+    };
+  }, [closeArtifact, handleImageAction]);
+
+  /** Insel-Button: Drop-Stapel zeigen bzw. verbergen. */
+  const toggleArtifactsWindow = useCallback(() => {
+    setPanelOpen((open) => !open);
+  }, []);
+
   return (
-    <div className="app">
-      <header className="titlebar" data-tauri-drag-region>
-        <span className="wordmark" data-tauri-drag-region>
-          OTTO <span className="ver">v0.4.0</span>
-        </span>
-        <span className="titlebar-right">
-          {update && (
-            <button
-              className="update-chip mono"
-              onClick={() => void startUpdate()}
-              disabled={updateProgress !== null}
-              title={`Version ${update.version} herunterladen und neu starten`}
-            >
-              {updateProgress === null
-                ? `⬆ Update ${update.version}`
-                : `lädt… ${updateProgress}%`}
-            </button>
-          )}
-          <button
-            className={`panel-toggle mono ${artifactsVisible ? "on" : ""}`}
-            title="Artefakt-Panel ein-/ausblenden"
-            aria-label="Artefakt-Panel ein-/ausblenden"
-            onClick={() => setArtifactsVisible((v) => !v)}
-          >
-            ▤{artifacts.length > 0 ? ` ${artifacts.length}` : ""}
-          </button>
-          <span className={`conn mono ${agentState}`}>{STATE_LABEL[agentState]}</span>
-        </span>
-      </header>
-
-      <div className={`main ${artifactsVisible ? "artifacts-open" : ""}`}>
-        <nav className="rail">
-          {NAV.map((item) => (
-            <button
-              key={item.view}
-              className={view === item.view ? "active" : ""}
-              title={item.label}
-              aria-label={item.label}
-              onClick={() => setView(item.view)}
-            >
-              {item.icon}
-            </button>
-          ))}
-        </nav>
-
-        <section className="stage">
-          {view === "talk" && (
-            <VoicePanel
-              state={agentState}
-              transcript={transcript}
-              error={error}
-              sessionStart={sessionStart}
-              activities={activities}
-              levels={levels}
-              onConnect={() => void connect()}
-              onDisconnect={() => void disconnect()}
-            />
-          )}
-          {view === "files" && <FilesPanel onStyleChanged={reloadArtifactStyle} />}
-          {view === "settings" && (
-            <SettingsPanel settings={settings} onSaved={setSettings} />
-          )}
-        </section>
-
-        <ArtifactPanel
-          artifacts={artifacts}
-          activeId={activeArtifactId}
-          onSelect={setActiveArtifactId}
-          onClose={closeArtifact}
-          artifactStyle={artifactStyle}
-          images={images}
-          onImageAction={handleImageAction}
-        />
-      </div>
-    </div>
+    <Island
+      state={agentState}
+      error={error}
+      activities={activities}
+      jobs={jobs}
+      onCancelJob={(id) => void cancelJob(id)}
+      levels={levels}
+      onConnect={() => void connect()}
+      onDisconnect={() => void disconnect()}
+      artifactCount={artifacts.length}
+      panelOpen={panelOpen}
+      onToggleArtifacts={toggleArtifactsWindow}
+      onDismiss={() => void dismiss()}
+      onOpenSettings={() => void showSettings("allgemein")}
+      update={update}
+      updateProgress={updateProgress}
+      onUpdate={() => void startUpdate()}
+    />
   );
 }

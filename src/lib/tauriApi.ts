@@ -1,7 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ImageMeta, SearchResult, Settings } from "./types";
+import type {
+  ImageMeta,
+  SearchResult,
+  SessionSearchHit,
+  Settings,
+  SkillInfo,
+  UnprocessedSession,
+} from "./types";
 
 export const getSettings = () => invoke<Settings>("get_settings");
+
+/** Doppel-Cmd-Erkennung (globaler NSEvent-Monitor) starten/stoppen. */
+export const dblcmdStart = () => invoke<void>("dblcmd_start");
+export const dblcmdStop = () => invoke<void>("dblcmd_stop");
+
+/** Interne Diagnose-Zeile nach otto.log schreiben (nie in die UI). */
+export const logLine = (line: string) =>
+  invoke<void>("log_line", { line }).catch(() => {});
 
 export const saveSettings = (settings: Settings) =>
   invoke<void>("save_settings", { settings });
@@ -60,9 +75,75 @@ export const imageExport = (id: string, dest?: string) =>
 export const imageImport = (source: string, name?: string) =>
   invoke<ImageMeta>("image_import", { source, name });
 
+export const cliJobStart = (agent: string, task: string, cwd?: string) =>
+  invoke<string>("cli_job_start", { agent, task, cwd });
+
+export const cliJobCancel = (jobId: string) =>
+  invoke<string[]>("cli_job_cancel", { jobId });
+
+export const cliAvailable = () =>
+  invoke<{ codex: boolean; claude: boolean }>("cli_available");
+
+export const wakeWordStart = (phrases: string[]) =>
+  invoke<void>("wake_word_start", { phrases });
+
+export const wakeWordStop = () => invoke<void>("wake_word_stop");
+
 export const braveSearch = (query: string, apiKey: string, count?: number) =>
   invoke<{ query: string; results: SearchResult[] }>("brave_search", {
     query,
     apiKey,
     count,
   });
+
+// --- Session-Persistenz (SQLite + FTS5) ---
+
+export const sessionStart = () => invoke<number>("session_start");
+
+export const sessionAppend = (sessionId: number, role: string, text: string) =>
+  invoke<void>("session_append", { sessionId, role, text });
+
+export const sessionEnd = (sessionId: number) =>
+  invoke<void>("session_end", { sessionId });
+
+export const sessionsSearch = (query: string, limit?: number) =>
+  invoke<SessionSearchHit[]>("sessions_search", { query, limit });
+
+export const sessionsUnprocessed = () =>
+  invoke<UnprocessedSession[]>("sessions_unprocessed");
+
+export const sessionMarkProcessed = (sessionId: number) =>
+  invoke<void>("session_mark_processed", { sessionId });
+
+export const sessionsCleanup = (days: number) =>
+  invoke<number>("sessions_cleanup", { days });
+
+// --- Gedächtnis (Tagesnotizen + Konsolidierungs-State) ---
+
+export const memoryNoteAppend = (text: string, date?: string) =>
+  invoke<void>("memory_note_append", { text, date });
+
+export const memoryNotesRecent = (days: number) =>
+  invoke<string>("memory_notes_recent", { days });
+
+export const memoryNotesCleanup = (keepDays: number) =>
+  invoke<number>("memory_notes_cleanup", { keepDays });
+
+export const memoryStateGet = () =>
+  invoke<Record<string, unknown>>("memory_state_get");
+
+export const memoryStateSet = (state: Record<string, unknown>) =>
+  invoke<void>("memory_state_set", { state });
+
+// --- Skills ---
+
+export const skillsList = () => invoke<SkillInfo[]>("skills_list");
+
+export const skillRead = (name: string) =>
+  invoke<string>("skill_read", { name });
+
+export const skillWrite = (name: string, content: string) =>
+  invoke<void>("skill_write", { name, content });
+
+export const skillDelete = (name: string) =>
+  invoke<void>("skill_delete", { name });

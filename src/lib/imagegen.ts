@@ -28,6 +28,93 @@ export function isOpenAiImageModel(model: string): boolean {
   return model.startsWith("gpt-image");
 }
 
+export interface ImageModelInfo {
+  id: string;
+  label: string;
+  provider: "openai" | "openrouter";
+}
+
+let openRouterModelsCache: ImageModelInfo[] | null = null;
+
+/**
+ * Lädt alle Bildmodelle der OpenRouter Unified Image API
+ * (GET /api/v1/images/models) und cached sie für die App-Laufzeit.
+ * Ohne Key oder bei Netzfehler bleibt die statische Liste der Fallback.
+ */
+export async function fetchImageModels(
+  openrouterKey: string,
+): Promise<ImageModelInfo[]> {
+  const builtin: ImageModelInfo[] = IMAGE_MODELS.filter(
+    (m) => m.provider === "openai",
+  ).map((m) => ({ id: m.id, label: m.label, provider: "openai" }));
+  if (!openrouterKey.trim()) {
+    return [
+      ...builtin,
+      ...IMAGE_MODELS.filter((m) => m.provider === "openrouter").map((m) => ({
+        id: m.id,
+        label: m.label,
+        provider: "openrouter" as const,
+      })),
+    ];
+  }
+  if (!openRouterModelsCache) {
+    try {
+      const resp = await fetch("https://openrouter.ai/api/v1/images/models", {
+        headers: { Authorization: `Bearer ${openrouterKey.trim()}` },
+      });
+      const json = await resp.json();
+      const list: ImageModelInfo[] = (json?.data ?? [])
+        .map((m: { id?: string; name?: string }) =>
+          m.id
+            ? {
+                id: m.id,
+                label: `${m.name ?? m.id} (OpenRouter)`,
+                provider: "openrouter" as const,
+              }
+            : null,
+        )
+        .filter(Boolean);
+      if (list.length > 0) openRouterModelsCache = list;
+    } catch {
+      // Netzfehler: statischer Fallback unten.
+    }
+  }
+  const openrouter =
+    openRouterModelsCache ??
+    IMAGE_MODELS.filter((m) => m.provider === "openrouter").map((m) => ({
+      id: m.id,
+      label: m.label,
+      provider: "openrouter" as const,
+    }));
+  return [...builtin, ...openrouter];
+}
+
+/**
+ * Fuzzy-Suche über die Modell-Liste („nimm mal Flux“ →
+ * black-forest-labs/flux…). Bewertet Treffer in id und Label.
+ */
+export function findImageModels(
+  models: ImageModelInfo[],
+  query: string,
+): ImageModelInfo[] {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return models.slice(0, 10);
+  return models
+    .map((m) => {
+      const hay = `${m.id} ${m.label}`.toLowerCase();
+      let score = 0;
+      for (const t of terms) {
+        if (m.id.toLowerCase() === t) score += 6;
+        else if (hay.includes(t)) score += 2;
+      }
+      return { m, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((x) => x.m);
+}
+
 const ASPECT_RATIOS: Record<Aspect, string> = {
   square: "1:1",
   landscape: "3:2",

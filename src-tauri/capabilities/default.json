@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main and mini windows",
-  "windows": ["main", "mini"],
+  "description": "Capability for the island, drops and settings windows",
+  "windows": ["main", "panel", "settings"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -10,11 +10,23 @@
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-set-shadow",
+    "core:window:allow-set-always-on-top",
     "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
+    "core:window:allow-unminimize",
     "core:window:allow-current-monitor",
     "core:window:allow-primary-monitor",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
     "updater:default",
     "process:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

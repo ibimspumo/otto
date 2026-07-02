@@ -111,13 +111,24 @@ interface Orb3DProps {
   state: AgentState;
   levels: React.MutableRefObject<{ inp: number; out: number }>;
   size?: number;
+  /**
+   * "full" = die große Bühne (Kern + Ringe + Partikel).
+   * "core" = nur der Plasma-Kern mit Glow — der Arc Reactor in der Insel.
+   */
+  variant?: "full" | "core";
 }
 
 /**
  * Der Glutkern in 3D: eine Shader-verformte Plasma-Sphäre, deren Amplitude
- * am Audiopegel hängt, umkreist von Gyroskop-Ringen und einem Partikelfeld.
+ * am Audiopegel hängt — als "full" umkreist von Gyroskop-Ringen und einem
+ * Partikelfeld, als "core" pur (für die Insel-Kapsel).
  */
-export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
+export default function Orb3D({
+  state,
+  levels,
+  size = 560,
+  variant = "full",
+}: Orb3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -125,6 +136,7 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
   useEffect(() => {
     const mount = mountRef.current!;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const coreOnly = variant === "core";
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -135,7 +147,8 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 50);
     // Weit genug zurück, dass Glow und Ringe vollständig im Bild liegen
     // und nicht an der quadratischen Canvas-Kante abgeschnitten werden.
-    camera.position.z = 5.6;
+    // Der pure Kern darf das Bild fast füllen.
+    camera.position.z = coreOnly ? 3.1 : 5.6;
 
     const uniforms = {
       uTime: { value: 0 },
@@ -155,7 +168,7 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
     );
     scene.add(core);
 
-    // Feines Drahtgitter als äußere Hülle
+    // Feines Drahtgitter als äußere Hülle (nur auf der großen Bühne)
     const shellMat = new THREE.MeshBasicMaterial({
       wireframe: true,
       transparent: true,
@@ -163,29 +176,31 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
       color: COLORS.disconnected.clone(),
     });
     const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(1.45, 2), shellMat);
-    scene.add(shell);
+    if (!coreOnly) scene.add(shell);
 
     // Gyroskop-Ringe
     const ringMats: THREE.MeshBasicMaterial[] = [];
     const rings: THREE.Mesh[] = [];
-    [1.75, 1.95, 2.18].forEach((radius, i) => {
-      const mat = new THREE.MeshBasicMaterial({
-        transparent: true,
-        opacity: 0.28 - i * 0.07,
-        color: COLORS.disconnected.clone(),
+    if (!coreOnly) {
+      [1.75, 1.95, 2.18].forEach((radius, i) => {
+        const mat = new THREE.MeshBasicMaterial({
+          transparent: true,
+          opacity: 0.28 - i * 0.07,
+          color: COLORS.disconnected.clone(),
+        });
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(radius, 0.0045 + i * 0.0015, 6, 160),
+          mat,
+        );
+        ring.rotation.set(Math.PI / 2 - i * 0.5, i * 0.9, i * 0.4);
+        ringMats.push(mat);
+        rings.push(ring);
+        scene.add(ring);
       });
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(radius, 0.0045 + i * 0.0015, 6, 160),
-        mat,
-      );
-      ring.rotation.set(Math.PI / 2 - i * 0.5, i * 0.9, i * 0.4);
-      ringMats.push(mat);
-      rings.push(ring);
-      scene.add(ring);
-    });
+    }
 
     // Partikelfeld auf einer Kugelschale
-    const COUNT = 420;
+    const COUNT = coreOnly ? 0 : 420;
     const positions = new Float32Array(COUNT * 3);
     for (let i = 0; i < COUNT; i++) {
       const r = 1.55 + Math.random() * 0.85;
@@ -206,7 +221,7 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
       color: COLORS.disconnected.clone(),
     });
     const particles = new THREE.Points(particleGeo, particleMat);
-    scene.add(particles);
+    if (!coreOnly) scene.add(particles);
 
     // Weicher Glow hinter allem
     const glowTex = makeGlowTexture();
@@ -219,7 +234,9 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
       color: COLORS.disconnected.clone(),
     });
     const glow = new THREE.Sprite(glowMat);
-    glow.scale.setScalar(4.0);
+    // Beim puren Kern steht die Kamera nah — der Glow muss ins Bild passen.
+    const glowBase = coreOnly ? 2.3 : 3.9;
+    glow.scale.setScalar(glowBase + 0.1);
     glow.position.z = -0.5;
     scene.add(glow);
 
@@ -265,7 +282,7 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
       particleMat.size = 0.016 + level * 0.02;
 
       glowMat.opacity = 0.35 + level * 0.45;
-      glow.scale.setScalar(3.9 + level * 0.7);
+      glow.scale.setScalar(glowBase + level * (coreOnly ? 0.35 : 0.7));
 
       renderer.render(scene, camera);
       raf = requestAnimationFrame(frame);
@@ -286,7 +303,7 @@ export default function Orb3D({ state, levels, size = 560 }: Orb3DProps) {
       });
       mount.removeChild(renderer.domElement);
     };
-  }, [levels, size]);
+  }, [levels, size, variant]);
 
-  return <div ref={mountRef} className="orb3d" />;
+  return <div ref={mountRef} className={`orb3d ${variant}`} />;
 }

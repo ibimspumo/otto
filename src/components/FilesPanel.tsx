@@ -74,9 +74,8 @@ export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
   }
 
   return (
-    <section className="panel">
-      <h2 className="panel-title">Dateien</h2>
-      <p className="panel-sub">
+    <section className="files-pane">
+      <p className="files-sub">
         Diese Dateien formen Ottos Identität, Gedächtnis und das Artefakt-Design
         (STYLE.css). Er liest sie bei jedem Verbindungsaufbau. &nbsp;·&nbsp;{" "}
         <span className="mono">{dirPath}</span>
@@ -101,7 +100,7 @@ export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && createFile()}
             />
-            <button className="btn small" onClick={createFile}>
+            <button className="push" onClick={createFile}>
               +
             </button>
           </div>
@@ -130,7 +129,7 @@ export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
             }}
           />
           <div className="editor-foot">
-            <button className="btn primary small" onClick={save} disabled={!dirty}>
+            <button className="push primary" onClick={save} disabled={!dirty}>
               Speichern
             </button>
             <span className="note">{status ?? "⌘S zum Speichern"}</span>

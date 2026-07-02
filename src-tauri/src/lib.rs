@@ -1,5 +1,12 @@
+mod cli;
 mod computer_use;
 mod images;
+mod memory;
+mod native;
+mod sessions;
+mod skills;
+mod tray;
+mod wake;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -19,6 +26,19 @@ pub struct Settings {
     pub computer_model: String,
     pub computer_use_enabled: bool,
     pub terminal_enabled: bool,
+    pub wake_word_enabled: bool,
+    pub wake_word_phrase: String,
+    pub hotkey_enabled: bool,
+    pub hotkey: String,
+    pub cli_enabled: bool,
+    pub cli_default: String,
+    pub cli_notes: String,
+    pub memory_enabled: bool,
+    pub memory_model: String,
+    pub session_retention_days: u32,
+    /// VAD-Schwelle (0.5–0.95): höher = unempfindlicher gegen
+    /// Hintergrundgeräusche (Fernseher, Ventilator).
+    pub vad_threshold: f32,
 }
 
 impl Default for Settings {
@@ -34,6 +54,20 @@ impl Default for Settings {
             computer_model: String::new(),
             computer_use_enabled: true,
             terminal_enabled: true,
+            // Wake Word ab Werk aus: solange gelauscht wird, zeigt macOS
+            // dauerhaft den Mikrofon-Indikator — Aktivierung läuft über
+            // den Hotkey (Doppel-Cmd).
+            wake_word_enabled: false,
+            wake_word_phrase: "Hey Otto".into(),
+            hotkey_enabled: true,
+            hotkey: "2x Cmd".into(),
+            cli_enabled: true,
+            cli_default: "codex".into(),
+            cli_notes: String::new(),
+            memory_enabled: true,
+            memory_model: "gpt-5-mini".into(),
+            session_retention_days: 30,
+            vad_threshold: 0.85,
         }
     }
 }
@@ -68,6 +102,24 @@ fn get_settings(app: tauri::AppHandle) -> Result<Settings, String> {
     }
     if settings.computer_model.trim().is_empty() {
         settings.computer_model = "gpt-5.5".into();
+    }
+    if settings.wake_word_phrase.trim().is_empty() {
+        settings.wake_word_phrase = "Hey Otto".into();
+    }
+    if settings.hotkey.trim().is_empty() {
+        settings.hotkey = "2x Cmd".into();
+    }
+    if settings.cli_default.trim().is_empty() {
+        settings.cli_default = "codex".into();
+    }
+    if settings.memory_model.trim().is_empty() {
+        settings.memory_model = "gpt-5-mini".into();
+    }
+    if settings.session_retention_days == 0 {
+        settings.session_retention_days = 30;
+    }
+    if !(0.3..=0.99).contains(&settings.vad_threshold) {
+        settings.vad_threshold = 0.85;
     }
     Ok(settings)
 }
@@ -293,6 +345,58 @@ async fn run_terminal(
     .map_err(|e| e.to_string())?
 }
 
+/// Internes Log (otto.log im App-Datenordner): technische Fehler und
+/// Diagnose-Zeilen aus dem Frontend, die den Nutzer nichts angehen, aber
+/// später auswertbar sein sollen. Simple Rotation: bei > 1 MB neu beginnen.
+#[tauri::command]
+fn log_line(app: tauri::AppHandle, line: String) -> Result<(), String> {
+    use std::io::Write;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("otto.log");
+    if let Ok(md) = fs::metadata(&path) {
+        if md.len() > 1_000_000 {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    writeln!(f, "[{ts}] {}", line.trim()).map_err(|e| e.to_string())
+}
+
+/// Glas fürs Panel-Fenster zur Laufzeit schalten: Der Drop-Stapel läuft ohne
+/// Fenster-Vibrancy (die Lücken zwischen den Karten müssen wirklich leer
+/// sein), Quick Look bekommt echtes macOS-Blur mit rundem Radius.
+#[tauri::command]
+fn panel_vibrancy(app: tauri::AppHandle, enable: bool, radius: f64) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let win = app
+            .get_webview_window("panel")
+            .ok_or("Panel-Fenster fehlt")?;
+        if enable {
+            window_vibrancy::apply_vibrancy(
+                &win,
+                window_vibrancy::NSVisualEffectMaterial::HudWindow,
+                None,
+                Some(radius),
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            window_vibrancy::clear_vibrancy(&win).map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, enable, radius);
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Panics landen in /tmp/otto-crash.log, damit Abstürze nachvollziehbar sind.
@@ -305,6 +409,40 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .setup(|app| {
+            // Menüleisten-App: kein Dock-Icon, Präsenz nur oben rechts.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            tray::setup(app.handle())?;
+            // Einstellungsfenster: Sidebar-Vibrancy über die ganze Fläche —
+            // die Seitenleiste bleibt im CSS transparent (echtes Glas), der
+            // Inhaltsbereich bekommt eine solide Fläche darüber.
+            #[cfg(target_os = "macos")]
+            if let Some(win) = app.get_webview_window("settings") {
+                let _ = window_vibrancy::apply_vibrancy(
+                    &win,
+                    window_vibrancy::NSVisualEffectMaterial::Sidebar,
+                    None,
+                    None,
+                );
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Der rote Schließen-Knopf des Einstellungsfensters versteckt es
+            // nur — zerstören würde spätere getByLabel-Aufrufe brechen.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "settings" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
@@ -317,6 +455,32 @@ pub fn run() {
             computer_use::cu_permissions,
             computer_use::cu_cancel,
             run_terminal,
+            panel_vibrancy,
+            log_line,
+            native::top_inset,
+            native::dblcmd_start,
+            native::dblcmd_stop,
+            cli::cli_job_start,
+            cli::cli_job_cancel,
+            cli::cli_available,
+            wake::wake_word_start,
+            wake::wake_word_stop,
+            sessions::session_start,
+            sessions::session_append,
+            sessions::session_end,
+            sessions::sessions_search,
+            sessions::sessions_unprocessed,
+            sessions::session_mark_processed,
+            sessions::sessions_cleanup,
+            memory::memory_note_append,
+            memory::memory_notes_recent,
+            memory::memory_notes_cleanup,
+            memory::memory_state_get,
+            memory::memory_state_set,
+            skills::skills_list,
+            skills::skill_read,
+            skills::skill_write,
+            skills::skill_delete,
             images::images_list,
             images::image_store,
             images::image_read_b64,

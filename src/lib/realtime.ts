@@ -7,7 +7,13 @@ export interface FunctionCall {
 export interface RealtimeCallbacks {
   onOpen: () => void;
   onClose: () => void;
+  /** Nutzer-relevante Fehler (Verbindung kaputt) — landen in der UI. */
   onError: (message: string) => void;
+  /**
+   * Technische Server-Fehler (z. B. „active response in progress“) —
+   * gehören ins interne Log, nie in die UI.
+   */
+  onLog?: (message: string) => void;
   onAudio: (b64: string) => void;
   onSpeechStart: () => void;
   onSpeechStop: () => void;
@@ -25,6 +31,8 @@ interface SessionParams {
   instructions: string;
   tools: object[];
   reasoningEffort?: string;
+  /** VAD-Schwelle 0.3–0.99 — höher = unempfindlicher gegen Nebengeräusche. */
+  vadThreshold?: number;
 }
 
 /**
@@ -94,14 +102,19 @@ export class RealtimeClient {
         input: {
           format: { type: "audio/pcm", rate: 24000 },
           transcription: { model: "gpt-4o-transcribe", language: "de" },
-          // Höhere Schwelle + längere Stille: verhindert, dass Restecho der
-          // Lautsprecher als Nutzer-Sprache erkannt wird und Otto sich selbst
-          // unterbricht. Echtes Reinreden funktioniert weiterhin.
+          // Far-Field-Rauschunterdrückung filtert Fernseher, Ventilatoren
+          // & Co. heraus, BEVOR die Sprach-Erkennung (VAD) sie sieht.
+          noise_reduction: { type: "far_field" },
+          // Hohe Schwelle + längere Stille: verhindert, dass leise
+          // Hintergrundgeräusche oder Lautsprecher-Restecho als Nutzer-
+          // Sprache gelten und Otto mitten im Satz abbrechen. Echtes
+          // Reinreden funktioniert weiterhin. Schwelle in den
+          // Einstellungen justierbar.
           turn_detection: {
             type: "server_vad",
-            threshold: 0.7,
+            threshold: p.vadThreshold ?? 0.85,
             prefix_padding_ms: 300,
-            silence_duration_ms: 500,
+            silence_duration_ms: 600,
           },
         },
         output: {
@@ -157,7 +170,9 @@ export class RealtimeClient {
   private handle(msg: any): void {
     switch (msg.type) {
       case "error": {
-        this.cb.onError(msg.error?.message ?? "Unbekannter Fehler");
+        // Server-Fehler-Events sind fast immer transient (Race-Conditions
+        // wie doppelte response.create) — still protokollieren.
+        this.cb.onLog?.(msg.error?.message ?? "Unbekannter Server-Fehler");
         break;
       }
       case "input_audio_buffer.speech_started":
@@ -200,9 +215,10 @@ export class RealtimeClient {
       case "response.done": {
         const status = msg.response?.status;
         if (status === "failed") {
-          this.cb.onError(
-            msg.response?.status_details?.error?.message ??
-              "Antwort fehlgeschlagen.",
+          this.cb.onLog?.(
+            `response failed: ${
+              msg.response?.status_details?.error?.message ?? "unbekannt"
+            }`,
           );
         }
         this.cb.onResponseDone();

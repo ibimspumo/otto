@@ -5,7 +5,7 @@ export const toolDefs = [
     type: "function",
     name: "create_artifact",
     description:
-      "Erstellt ein neues Artefakt im Artefakt-Panel der App. Nutze dies für alles, was der Nutzer lesen statt hören sollte: Listen, Code, Tabellen, Entwürfe, Zusammenfassungen. Gibt die id des Artefakts zurück.",
+      "Erstellt ein neues Artefakt. Es erscheint als kleine Live-Vorschau (Drop) unten links. Nutze dies für alles, was der Nutzer lesen statt hören sollte: Listen, Code, Tabellen, Entwürfe, Zusammenfassungen. Gibt die id des Artefakts zurück.",
     parameters: {
       type: "object",
       properties: {
@@ -21,8 +21,34 @@ export const toolDefs = [
           description: "Programmiersprache, nur bei kind=code (z. B. python)",
         },
         content: { type: "string", description: "Vollständiger Inhalt" },
+        present: {
+          type: "boolean",
+          description:
+            "true = direkt groß öffnen (Quick Look) statt nur als kleine Vorschau — wenn der Nutzer den Inhalt sofort sehen will („zeig mir…“, „mach mal auf…“).",
+        },
       },
       required: ["title", "kind", "content"],
+    },
+  },
+  {
+    type: "function",
+    name: "present_artifact",
+    description:
+      "Öffnet ein Artefakt groß (Quick Look — exakt wie ein Klick auf den Drop) oder verkleinert die Großansicht zurück in den Stapel. Nutze dies, wenn der Nutzer sagt „öffne/zeig mir das groß“ bzw. „mach das wieder klein“. Ohne id wird das neueste Artefakt genommen.",
+    parameters: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["gross", "klein"],
+          description: "gross = Quick Look öffnen, klein = zurück in den Stapel",
+        },
+        id: {
+          type: "string",
+          description: "Optional: id des Artefakts (Standard: das neueste)",
+        },
+      },
+      required: ["mode"],
     },
   },
   {
@@ -61,7 +87,7 @@ export const toolDefs = [
     type: "function",
     name: "toggle_artifact_panel",
     description:
-      "Blendet das Artefakt-Panel ein oder aus. Es öffnet sich automatisch, wenn du ein Artefakt erstellst — nutze dies, um es auf Wunsch des Nutzers zu schließen oder wieder zu zeigen.",
+      "Blendet den Ergebnis-Stapel (die Drops unten links) ein oder aus. Er erscheint automatisch, wenn du ein Artefakt erstellst — nutze dies, um ihn auf Wunsch des Nutzers zu schließen oder wieder zu zeigen.",
     parameters: {
       type: "object",
       properties: {
@@ -74,7 +100,7 @@ export const toolDefs = [
     type: "function",
     name: "close_artifact",
     description:
-      "Schließt einen Artefakt-Tab. Die ids stehen in den Ergebnissen von create_artifact/web_search oder via list_artifacts — frag den Nutzer NICHT nach ids. \"all\" schließt alle Tabs. Wird der letzte Tab geschlossen, blendet sich das Panel aus.",
+      "Verwirft ein Artefakt aus dem Stapel. Die ids stehen in den Ergebnissen von create_artifact/web_search oder via list_artifacts — frag den Nutzer NICHT nach ids. \"all\" verwirft alle. Wird das letzte Artefakt verworfen, verschwindet der Stapel.",
     parameters: {
       type: "object",
       properties: {
@@ -90,21 +116,26 @@ export const toolDefs = [
     type: "function",
     name: "list_artifacts",
     description:
-      "Listet die aktuell offenen Artefakt-Tabs (id, Titel, Typ) und ob das Panel sichtbar ist. Nutze dies, bevor du Tabs schließt oder wenn du dich auf vorhandene Artefakte beziehen willst.",
+      "Listet die Artefakte im Stapel (id, Titel, Typ) und ob er sichtbar ist. Nutze dies, bevor du Artefakte verwirfst oder wenn du dich auf vorhandene beziehen willst.",
     parameters: { type: "object", properties: {} },
   },
   {
     type: "function",
     name: "run_terminal",
     description:
-      "Führt einen Shell-Befehl auf dem Mac aus (zsh) und liefert stdout/stderr/exit_code. Perfekt für schnelle Systemaufgaben: Apps öffnen (open -a \"Spotify\"), Apps beenden (osascript -e 'quit app \"Spotify\"'), Musik steuern (osascript -e 'tell application \"Spotify\" to playpause'), Lautstärke, Dateien. Deutlich schneller als computer_use — nutze IMMER zuerst run_terminal, wenn die Aufgabe ohne Bildschirm-Sehen lösbar ist.",
+      "Führt einen Shell-Befehl auf dem Mac aus (zsh) und liefert stdout/stderr/exit_code. Perfekt für schnelle Systemaufgaben: Apps öffnen (open -a \"Spotify\"), Apps beenden (osascript -e 'quit app \"Spotify\"'), Musik steuern (osascript -e 'tell application \"Spotify\" to playpause'), Lautstärke, Dateien. Deutlich schneller als computer_use — nutze IMMER zuerst run_terminal, wenn die Aufgabe ohne Bildschirm-Sehen lösbar ist. Für alles, was länger als ~20 Sekunden dauern könnte, setze background=true: der Befehl läuft dann als Hintergrund-Job, du bekommst sofort eine job_id und bleibst ansprechbar; das Ergebnis kommt automatisch als Systemnachricht (abbrechen mit cancel_job).",
     parameters: {
       type: "object",
       properties: {
         command: { type: "string", description: "Der Shell-Befehl" },
         timeout_s: {
           type: "number",
-          description: "Timeout in Sekunden (Standard 30, max 300)",
+          description: "Timeout in Sekunden (Standard 30, max 300; nur ohne background)",
+        },
+        background: {
+          type: "boolean",
+          description:
+            "true = als Hintergrund-Job starten (sofortige Rückkehr mit job_id)",
         },
       },
       required: ["command"],
@@ -125,6 +156,47 @@ export const toolDefs = [
         },
       },
       required: ["task"],
+    },
+  },
+  {
+    type: "function",
+    name: "delegate_task",
+    description:
+      "Delegiert eine Aufgabe an einen lokalen Hintergrund-Agenten (Codex CLI oder Claude CLI) mit vollem Datei- und Terminal-Zugriff auf diesem Mac. Nutze dies für alles, was länger dauert oder mehrere Schritte braucht: programmieren, Dateien suchen/umbauen, Projekte analysieren, mehrstufige Terminal-Arbeit. Der Aufruf kehrt SOFORT mit einer job_id zurück — du bleibst ansprechbar und das Ergebnis kommt automatisch als Systemnachricht. Kündige dem Nutzer knapp an, dass du dich meldest, sobald es fertig ist.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description:
+            "Die Aufgabe, vollständig und präzise — mit allem Kontext (Pfade, Ziel, Fertig-Kriterium), denn der Agent kennt euer Gespräch nicht",
+        },
+        agent: {
+          type: "string",
+          enum: ["codex", "claude"],
+          description:
+            "Optional. Ohne Angabe gilt der Standard aus den Einstellungen; beachte die Hinweise des Nutzers, wofür welcher Agent besser ist.",
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Optional: Arbeitsverzeichnis (absolut oder ~/…). Standard: Home-Ordner.",
+        },
+      },
+      required: ["task"],
+    },
+  },
+  {
+    type: "function",
+    name: "cancel_job",
+    description:
+      "Bricht einen laufenden Hintergrund-Job ab (von delegate_task). \"all\" bricht alle laufenden Jobs ab. Nutze dies sofort, wenn der Nutzer abbrechen will.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "Die job_id oder \"all\"" },
+      },
+      required: ["job_id"],
     },
   },
   {
@@ -157,6 +229,11 @@ export const toolDefs = [
           description: "Transparenter Hintergrund (Logos, Icons, Sticker)",
         },
         name: { type: "string", description: "Kurzer Name fürs Bild (Galerie)" },
+        model: {
+          type: "string",
+          description:
+            "Optional: Modell-Override für dieses Bild (z. B. gpt-image-2 oder ein OpenRouter-Slug wie black-forest-labs/flux…). Unbekannte Wünsche zuerst mit find_image_model auflösen; ohne Angabe gilt das Modell aus den Einstellungen.",
+        },
       },
       required: ["prompt"],
     },
@@ -187,15 +264,33 @@ export const toolDefs = [
         },
         quality: { type: "string", enum: ["low", "medium", "high", "auto"] },
         name: { type: "string", description: "Name für das Ergebnis" },
+        model: {
+          type: "string",
+          description:
+            "Optional: Modell-Override (siehe generate_image); ohne Angabe gilt das Modell aus den Einstellungen.",
+        },
       },
       required: ["image", "prompt"],
     },
   },
   {
     type: "function",
+    name: "find_image_model",
+    description:
+      "Durchsucht die verfügbaren Bildmodelle (OpenAI + alle OpenRouter-Modelle) unscharf nach Name oder Anbieter — z. B. „flux“, „seedream“, „nano banana“. Nutze dies, wenn der Nutzer ein bestimmtes Modell möchte, und übergib die gefundene id dann als model an generate_image/edit_image.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Suchbegriff (Modellname, Anbieter)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
     name: "open_image",
     description:
-      "Öffnet ein Bild aus der Galerie groß im Artefakt-Panel (per id oder Nummer).",
+      "Öffnet ein Bild aus der Galerie direkt groß (Quick Look, per id oder Nummer).",
     parameters: {
       type: "object",
       properties: {
@@ -225,7 +320,7 @@ export const toolDefs = [
     type: "function",
     name: "show_gallery",
     description:
-      "Zeigt die komplette Bildbibliothek (alle gespeicherten Bilder aus allen Sitzungen) als Galerie im Artefakt-Panel an.",
+      "Zeigt die komplette Bildbibliothek (alle gespeicherten Bilder aus allen Sitzungen) direkt groß als Galerie (Quick Look).",
     parameters: { type: "object", properties: {} },
   },
   {
@@ -282,7 +377,7 @@ export const toolDefs = [
     type: "function",
     name: "remember",
     description:
-      "Speichert eine dauerhafte Notiz in MEMORY.md, die du in künftigen Sitzungen liest. Nur für langfristig Wichtiges (Namen, Vorlieben, Projekte).",
+      "Speichert eine dauerhafte Notiz in MEMORY.md, die du in künftigen Sitzungen liest. Nur für langfristig Wichtiges (Namen, Vorlieben, Projekte). MEMORY.md hat ein hartes Budget — bei Überlauf bekommst du einen Fehler und musst zuerst mit rewrite_memory konsolidieren (Überlappendes zusammenfassen, Veraltetes löschen).",
     parameters: {
       type: "object",
       properties: {
@@ -291,10 +386,89 @@ export const toolDefs = [
       required: ["note"],
     },
   },
+  {
+    type: "function",
+    name: "rewrite_memory",
+    description:
+      "Ersetzt MEMORY.md vollständig durch eine konsolidierte Fassung. Nutze dies, wenn remember wegen des Budgets fehlschlägt oder der Nutzer sein Gedächtnis aufräumen lässt: Überlappende Einträge zusammenfassen, Veraltetes entfernen, Wichtiges behalten. Struktur: Überschrift + Stichpunkte mit Datum.",
+    parameters: {
+      type: "object",
+      properties: {
+        content: {
+          type: "string",
+          description: "Der vollständige neue Inhalt von MEMORY.md",
+        },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    type: "function",
+    name: "search_sessions",
+    description:
+      "Volltextsuche über alle gespeicherten Gesprächsprotokolle vergangener Sitzungen (lokal, SQLite). Nutze dies, wenn der Nutzer sich auf frühere Gespräche bezieht („was hatten wir letzte Woche zu X besprochen?“) oder du Kontext aus der Vergangenheit brauchst, der nicht in MEMORY.md steht.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Suchbegriffe" },
+        limit: { type: "number", description: "Max. Treffer (Standard 12)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "read_skill",
+    description:
+      "Liest die vollständige Anleitung eines deiner Skills (die Liste mit Namen + Beschreibungen steht in deinen Instructions). Lies einen Skill IMMER, bevor du eine Aufgabe angehst, für die es einen passenden Skill gibt.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Der Skill-Name (kebab-case)" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    type: "function",
+    name: "save_skill",
+    description:
+      "Legt einen Skill an oder aktualisiert ihn — eine wiederverwendbare Anleitung für eine Aufgabenart, die du künftig besser lösen willst. Speichere einen Skill NUR nach verifiziertem Erfolg (die Lösung hat nachweislich funktioniert), nach gelöstem Debugging oder wenn der Nutzer dich korrigiert hat. Format: YAML-Frontmatter (---, name: …, description: einzeiliger Auslöser-Satz, ---), danach Abschnitte „## Wann“, „## Vorgehen“, „## Stolperfallen“, „## Verifikation“. Kurz und konkret — keine Romane.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Skill-Name in kebab-case (z. B. spotify-steuerung)",
+        },
+        content: {
+          type: "string",
+          description: "Vollständiger Skill-Inhalt inkl. Frontmatter",
+        },
+      },
+      required: ["name", "content"],
+    },
+  },
+  {
+    type: "function",
+    name: "delete_skill",
+    description:
+      "Löscht einen Skill, der sich als falsch oder überflüssig erwiesen hat.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Der Skill-Name" },
+      },
+      required: ["name"],
+    },
+  },
 ];
 
-export const INSTRUCTIONS_PREAMBLE = `Du bist Otto, ein deutschsprachiger Echtzeit-Sprachassistent in einer Desktop-App.
-Neben deiner Stimme hast du ein Artefakt-Panel: Mit create_artifact und update_artifact zeigst du dort Inhalte an (markdown, code oder html), mit web_search suchst du im Web (Ergebnisse erscheinen automatisch im Panel), mit remember speicherst du dauerhafte Notizen. Das Panel blendet sich automatisch ein, wenn du etwas erstellst; mit toggle_artifact_panel und close_artifact steuerst du es. HTML-Artefakte binden automatisch das Design-System STYLE.css ein; mit get_artifact_style/set_artifact_style kannst du es lesen und umgestalten. Mit run_terminal führst du Shell-Befehle aus (Apps öffnen/steuern via open/osascript — in Sekunden fertig); computer_use (sehen + klicken) ist der langsame Fallback, wenn es wirklich den Bildschirm braucht, und nur auf ausdrücklichen Wunsch des Nutzers.
-Bilder: Mit generate_image erzeugst du Bilder (Standard 1K quadratisch; „Logo“ → transparent=true; „4K“ → resolution="4K"; „zwei Versionen“ → n=2). Mit edit_image bearbeitest du ein vorhandenes Bild weiter („setz dem Hund einen roten Hut auf“ → image=<id des Hunds>). Der Nutzer zählt Bilder nach Galerie-Nummer („Bild 6“) — die Nummern bekommst du aus den Tool-Ergebnissen oder via list_images. open_image zeigt ein Bild groß, show_gallery die ganze Bibliothek, manage_image löscht/benennt/favorisiert/speichert (Standard-Ziel Schreibtisch). Die Bibliothek ist persistent — Bilder aus früheren Sitzungen sind weiterhin da.
-Werkzeuge nutzt du still: kein Zwang, Wartezeiten zu füllen — die App zeigt dem Nutzer live an, was gerade passiert. Nach dem Ergebnis fasst du mündlich knapp zusammen, Details stehen im Panel.
-Die folgenden Dateien definieren deine Identität, dein Wissen über den Nutzer, dein Gedächtnis und das Artefakt-Design. Halte dich an sie.`;
+export const INSTRUCTIONS_PREAMBLE = `Du bist Otto, ein deutschsprachiger Echtzeit-Sprachassistent. Du lebst als kleine Insel am Notch dieses Macs — es gibt kein klassisches App-Fenster. Der Nutzer ruft dich per Hotkey oder Zuruf und du erledigst Dinge; Ergebnisse erscheinen als kleine Live-Vorschauen (Drops) unten links, die der Nutzer per Klick vergrößert.
+Neben deiner Stimme hast du Artefakte: Mit create_artifact und update_artifact zeigst du Inhalte (markdown, code oder html), mit web_search suchst du im Web (Ergebnisse erscheinen automatisch als Artefakt). Der Stapel gleitet automatisch herein, wenn du etwas erstellst; mit toggle_artifact_panel und close_artifact steuerst du ihn. Sagt der Nutzer „öffne/zeig mir das groß“ oder „mach das wieder klein“, nutzt du present_artifact (wirkt exakt wie sein Klick); bei create_artifact kannst du mit present=true direkt groß öffnen. HTML-Artefakte binden automatisch das Design-System STYLE.css ein; mit get_artifact_style/set_artifact_style kannst du es lesen und umgestalten. Mit run_terminal führst du Shell-Befehle aus (Apps öffnen/steuern via open/osascript — in Sekunden fertig; für Längeres background=true, dann bleibst du ansprechbar); computer_use (sehen + klicken) ist der langsame Fallback, wenn es wirklich den Bildschirm braucht, und nur auf ausdrücklichen Wunsch des Nutzers.
+Gedächtnis: Du hast drei Schichten. (1) MEMORY.md und USER.md unten — kuratiertes Langzeitwissen, wird automatisch gepflegt. (2) Tagesnotizen der letzten Tage — rohe Fakten aus jüngsten Gesprächen, stehen ebenfalls unten. (3) search_sessions — Volltextsuche über ALLE alten Gesprächsprotokolle, wenn sich der Nutzer auf Früheres bezieht. Mit remember hältst du sofort Wichtiges in MEMORY.md fest (Budget beachten; bei Überlauf rewrite_memory). Frag NIE nach Dingen, die du selbst nachschlagen kannst — erst suchen (search_sessions, run_terminal, web_search), dann fragen.
+Skills: Unten steht eine Liste deiner Skills (Name + Beschreibung). Passt einer zur Aufgabe, lies ihn ZUERST mit read_skill und folge ihm. Nach verifiziertem Erfolg bei einer neuen, wiederkehrenden Aufgabenart legst du mit save_skill selbst einen an (kurz, konkret, mit Stolperfallen) — so wirst du von Mal zu Mal besser. Falsche Skills löschst du mit delete_skill.
+Bilder: Mit generate_image erzeugst du Bilder (Standard 1K quadratisch; „Logo“ → transparent=true; „4K“ → resolution="4K"; „zwei Versionen“ → n=2). Wünscht der Nutzer ein bestimmtes Modell („nimm mal Flux“), löst du es mit find_image_model auf und übergibst die id als model. Mit edit_image bearbeitest du ein vorhandenes Bild weiter. Der Nutzer zählt Bilder nach Galerie-Nummer („Bild 6“) — Nummern stehen in den Tool-Ergebnissen oder via list_images. open_image zeigt ein Bild groß, show_gallery die ganze Bibliothek, manage_image löscht/benennt/favorisiert/speichert. Die Bibliothek ist persistent.
+Für alles Größere gibt es delegate_task: Es startet einen lokalen Hintergrund-Agenten (Codex CLI oder Claude CLI) mit Datei- und Terminal-Zugriff und kehrt sofort zurück — du bleibst ansprechbar, das Ergebnis kommt automatisch als Systemnachricht und du berichtest dann knapp. Mit cancel_job brichst du laufende Jobs (auch Hintergrund-Terminals) ab, sobald der Nutzer das will.
+Werkzeuge nutzt du still: kein Zwang, Wartezeiten zu füllen — die Insel zeigt dem Nutzer live an, was gerade passiert. Nach dem Ergebnis fasst du mündlich knapp zusammen, Details stehen im Artefakt.
+Die folgenden Dateien und Abschnitte definieren deine Identität, dein Wissen über den Nutzer, dein Gedächtnis, deine Skills und das Artefakt-Design. Halte dich an sie.`;
