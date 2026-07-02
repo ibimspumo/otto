@@ -53,6 +53,14 @@ Mac und lassen sich in den Einstellungen anpassen.
 
 1. **Otto installieren** — aktuelles Release laden, App in den Programme-Ordner
    ziehen, starten. Otto erscheint als Icon in der Menüleiste.
+
+   > **Hinweis:** Otto ist (noch) nicht von Apple notarisiert. Meldet macOS,
+   > die App sei „beschädigt“ oder könne nicht geöffnet werden, einmal im
+   > Terminal ausführen:
+   >
+   > ```sh
+   > xattr -cr /Applications/Otto.app
+   > ```
 2. **OpenAI-API-Key eintragen** — beim ersten Start öffnen sich die
    Einstellungen automatisch. Der Key bleibt lokal auf deinem Mac und wird nur
    direkt von dort verwendet.
