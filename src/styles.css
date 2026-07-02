@@ -136,14 +136,12 @@ button {
 .island {
   position: relative;
   z-index: 2;
-  width: 200px;
+  width: 44px;
   height: 44px;
-  /* Schwebende Pille im Notch-Schwarz — bewusst UNTER der Menüleiste,
-     eine Kapsel an der Kante sähe wie eine zweite Notch aus. */
   background: #000;
   border: 1px solid var(--hair);
   border-radius: 999px;
-  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
   transition: width 240ms var(--ease-out);
 }
 
@@ -324,21 +322,8 @@ button {
   border-radius: 7px;
 }
 
-/* Das Zustandslicht strahlt unter der Kapsel auf den Bildschirm. */
 .island-glow {
-  position: absolute;
-  top: 46px;
-  left: 0;
-  right: 0;
-  height: 56px;
-  z-index: 1;
-  pointer-events: none;
-  background: radial-gradient(
-    55% 100% at 50% 0%,
-    color-mix(in oklab, var(--light) 32%, transparent),
-    transparent 75%
-  );
-  transition: background 600ms ease;
+  display: none;
 }
 
 /* ------------------------------------------------------------------ */

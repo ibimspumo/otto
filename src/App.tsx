@@ -115,10 +115,11 @@ export default function App() {
   // Quick Look per Stimme: wirkt exakt wie ein Klick auf den Drop.
   // War das Fenster zu, wird der Wunsch vorgemerkt und nach dem
   // panel-open-Event eingelöst (sonst würde der fresh-Reset ihn schlucken).
-  const pendingPresent = useRef<{ mode: "gross" | "klein"; id?: string } | null>(
+  type PresentMode = "gross" | "riesig" | "klein";
+  const pendingPresent = useRef<{ mode: PresentMode; id?: string } | null>(
     null,
   );
-  const presentArtifact = useCallback((mode: "gross" | "klein", id?: string) => {
+  const presentArtifact = useCallback((mode: PresentMode, id?: string) => {
     if (mode === "klein") {
       void emit("panel-present", { mode });
       return;
@@ -478,7 +479,12 @@ export default function App() {
             break;
           }
           case "present_artifact": {
-            const mode = args.mode === "klein" ? "klein" : "gross";
+            const mode =
+              args.mode === "klein"
+                ? "klein"
+                : args.mode === "riesig"
+                  ? "riesig"
+                  : "gross";
             const id = args.id ? String(args.id) : undefined;
             if (id && !artifactsRef.current.some((a) => a.id === id)) {
               out = {
@@ -492,13 +498,17 @@ export default function App() {
               };
               break;
             }
-            if (mode === "gross" && artifactsRef.current.length === 0) {
+            if (mode !== "klein" && artifactsRef.current.length === 0) {
               out = { ok: false, error: "Es gibt gerade keine Artefakte." };
               break;
             }
             presentArtifact(mode, id);
             pushActivity(
-              mode === "gross" ? "öffnet die Großansicht" : "verkleinert die Ansicht",
+              mode === "klein"
+                ? "verkleinert die Ansicht"
+                : mode === "riesig"
+                  ? "öffnet die Lightbox"
+                  : "öffnet die Großansicht",
             );
             out = { ok: true };
             break;

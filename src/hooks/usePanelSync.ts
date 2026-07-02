@@ -15,7 +15,10 @@ import type { ImageAction } from "../components/ArtifactContent";
 interface UsePanelSyncArgs {
   panelOpen: boolean;
   setPanelOpen: Dispatch<SetStateAction<boolean>>;
-  pendingPresent: MutableRefObject<{ mode: "gross" | "klein"; id?: string } | null>;
+  pendingPresent: MutableRefObject<{
+    mode: "gross" | "riesig" | "klein";
+    id?: string;
+  } | null>;
   artifacts: Artifact[];
   activeArtifactId: string | null;
   images: Record<string, ImageState>;

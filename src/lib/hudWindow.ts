@@ -31,8 +31,8 @@ export type IslandMode = "compact" | "wide";
 // Fenstermaße (logische Punkte). Die Kapsel sitzt am oberen Fensterrand,
 // darunter bleibt Luft, in die das Zustandslicht ausstrahlen kann.
 const ISLAND_SIZE: Record<IslandMode, { w: number; h: number }> = {
-  compact: { w: 280, h: 104 },
-  wide: { w: 560, h: 104 },
+  compact: { w: 52, h: 52 },
+  wide: { w: 560, h: 56 },
 };
 
 /** Abstand der Pille zur Unterkante von Notch/Menüleiste. */
@@ -159,6 +159,7 @@ export async function layoutDrops(contentHeight: number): Promise<void> {
 export async function layoutQuickLook(
   wantW: number,
   wantH: number,
+  size: "normal" | "large" = "normal",
 ): Promise<{ w: number; h: number }> {
   const fallback = { w: wantW, h: wantH };
   try {
@@ -166,8 +167,9 @@ export async function layoutQuickLook(
     const monitor = await anyMonitor();
     if (!panel || !monitor) return fallback;
     const sf = monitor.scaleFactor;
-    const maxW = (monitor.size.width / sf) * 0.85;
-    const maxH = (monitor.size.height / sf) * 0.85;
+    const max = size === "large" ? 0.96 : 0.85;
+    const maxW = (monitor.size.width / sf) * max;
+    const maxH = (monitor.size.height / sf) * max;
     // Proportional einpassen — die Aspect Ratio des Inhalts bleibt erhalten.
     const scale = Math.min(1, maxW / wantW, maxH / wantH);
     const w = Math.round(wantW * scale);
@@ -175,7 +177,7 @@ export async function layoutQuickLook(
     await invoke("panel_vibrancy", { enable: true, radius: QL_RADIUS }).catch(
       () => {},
     );
-    await panel.setShadow(true).catch(() => {});
+    await panel.setShadow(size === "normal").catch(() => {});
     await panel.setSize(new PhysicalSize(Math.round(w * sf), Math.round(h * sf)));
     await panel.setPosition(
       new PhysicalPosition(

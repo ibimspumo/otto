@@ -20,6 +20,8 @@ interface PanelState {
 }
 
 type Mode = "stack" | "quicklook";
+type PresentMode = "gross" | "riesig" | "klein";
+type QuickLookSize = "normal" | "large";
 
 // ------------------------------------------------------------------
 // Stapel-Geometrie: deterministisch berechnet, damit das Fenster exakt
@@ -75,7 +77,9 @@ function stackHeight(
 function desiredQuickLook(
   a: Artifact,
   images: Record<string, ImageState>,
+  size: QuickLookSize = "normal",
 ): { w: number; h: number } {
+  const boost = size === "large" ? 1.25 : 1;
   switch (a.kind) {
     case "image": {
       const ids = a.imageIds ?? [];
@@ -83,20 +87,24 @@ function desiredQuickLook(
         const st = images[ids[0]];
         const dims = parseSize(st?.meta?.size ?? st?.size);
         if (dims) {
-          // Halbe Pixelmaße = natürliche Retina-Darstellungsgröße; die
-          // Aspect Ratio des Fensters IST die des Bildes.
-          return { w: Math.max(380, dims.w / 2), h: Math.max(300, dims.h / 2) };
+          // Normal: natürliche Retina-Darstellungsgröße. Riesig: echte
+          // Pixelmaße, vom Fensterlayout an den Bildschirm angepasst.
+          const divisor = size === "large" ? 1 : 2;
+          return {
+            w: Math.max(380, dims.w / divisor),
+            h: Math.max(300, dims.h / divisor),
+          };
         }
-        return { w: 720, h: 560 };
+        return { w: 720 * boost, h: 560 * boost };
       }
-      return { w: 960, h: 660 };
+      return { w: 960 * boost, h: 660 * boost };
     }
     case "html":
-      return { w: 980, h: 700 };
+      return { w: 980 * boost, h: 700 * boost };
     case "search":
-      return { w: 620, h: 680 };
+      return { w: 620 * boost, h: 680 * boost };
     default:
-      return { w: 720, h: 680 };
+      return { w: 720 * boost, h: 680 * boost };
   }
 }
 
@@ -204,9 +212,13 @@ export default function PanelApp() {
   });
   const [mode, setMode] = useState<Mode>("stack");
   const [qlId, setQlId] = useState<string | null>(null);
+  const [qlSize, setQlSize] = useState<QuickLookSize>("normal");
   // Quick-Look-Wunsch per Stimme, dessen Artefakt noch nicht im
   // gespiegelten Zustand angekommen ist — wird beim nächsten Update eingelöst.
-  const [pendingQl, setPendingQl] = useState<string | null>(null);
+  const [pendingQl, setPendingQl] = useState<{
+    id: string;
+    size: QuickLookSize;
+  } | null>(null);
   const readySent = useRef(false);
   const modeRef = useRef<Mode>("stack");
   modeRef.current = mode;
@@ -222,28 +234,32 @@ export default function PanelApp() {
       if (e.payload?.fresh) {
         setMode("stack");
         setQlId(null);
+        setQlSize("normal");
       }
     });
     // Quick Look per Stimme (present_artifact) — wirkt wie ein Klick.
-    const unPresent = listen<{ mode: "gross" | "klein"; id?: string }>(
+    const unPresent = listen<{ mode: PresentMode; id?: string }>(
       "panel-present",
       (e) => {
         if (e.payload.mode === "klein") {
           setMode("stack");
           setQlId(null);
+          setQlSize("normal");
           setPendingQl(null);
           return;
         }
+        const size = e.payload.mode === "riesig" ? "large" : "normal";
         const arts = stateRef.current.artifacts;
         const target = e.payload.id
           ? arts.find((a) => a.id === e.payload.id)
           : arts[arts.length - 1];
         if (target) {
           setQlId(target.id);
+          setQlSize(size);
           setMode("quicklook");
         } else if (e.payload.id) {
           // Artefakt eilt dem panel-state-Spiegel voraus — vormerken.
-          setPendingQl(e.payload.id);
+          setPendingQl({ id: e.payload.id, size });
         }
       },
     );
@@ -265,6 +281,7 @@ export default function PanelApp() {
       if (modeRef.current === "quicklook") {
         setMode("stack");
         setQlId(null);
+        setQlSize("normal");
       } else {
         void emit("panel-close", {});
       }
@@ -296,8 +313,9 @@ export default function PanelApp() {
   // gespiegelten Zustand angekommen ist.
   useEffect(() => {
     if (!pendingQl) return;
-    if (artifacts.some((a) => a.id === pendingQl)) {
-      setQlId(pendingQl);
+    if (artifacts.some((a) => a.id === pendingQl.id)) {
+      setQlId(pendingQl.id);
+      setQlSize(pendingQl.size);
       setMode("quicklook");
       setPendingQl(null);
     }
@@ -341,15 +359,16 @@ export default function PanelApp() {
   // Quick Look: Fenster wächst zur Inhaltsgröße (Bilder in echter Ratio).
   useEffect(() => {
     if (mode !== "quicklook" || !qlArtifact) return;
-    const want = desiredQuickLook(qlArtifact, images);
-    void layoutQuickLook(want.w, want.h);
+    const want = desiredQuickLook(qlArtifact, images, qlSize);
+    void layoutQuickLook(want.w, want.h, qlSize);
     // Bewusst nur bei Artefakt-/Größenwechsel, nicht bei jedem images-Tick:
     // die Ratio steht schon während der Generierung fest (size).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, qlArtifact?.id, qlArtifact?.updatedAt]);
+  }, [mode, qlArtifact?.id, qlArtifact?.updatedAt, qlSize]);
 
   const openQuickLook = (a: Artifact) => {
     setQlId(a.id);
+    setQlSize("normal");
     setMode("quicklook");
     void emit("panel-action", { type: "select", id: a.id });
   };
@@ -375,6 +394,7 @@ export default function PanelApp() {
             onClick={() => {
               setMode("stack");
               setQlId(null);
+              setQlSize("normal");
             }}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">

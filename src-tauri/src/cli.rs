@@ -17,6 +17,10 @@ use tauri::Emitter;
 /// Sicherheitsnetz gegen vergessene Jobs — danach wird hart beendet.
 const MAX_RUNTIME_SECS: u64 = 1800;
 const MAX_OUTPUT_CHARS: usize = 200_000;
+const CLI_PATH_SETUP: &str = concat!(
+    r#"PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:"#,
+    r#"$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin"; export PATH; "#
+);
 
 fn jobs() -> &'static Mutex<HashMap<String, i32>> {
     static JOBS: OnceLock<Mutex<HashMap<String, i32>>> = OnceLock::new();
@@ -93,18 +97,18 @@ pub fn cli_job_start(
     }
     let cmdline = match agent.as_str() {
         "codex" => format!(
-            "codex exec -s workspace-write --skip-git-repo-check {}",
+            "{CLI_PATH_SETUP}codex exec -s workspace-write --skip-git-repo-check {}",
             shell_quote(&task)
         ),
         "claude" => format!(
-            "claude -p {} --permission-mode acceptEdits",
+            "{CLI_PATH_SETUP}claude -p {} --permission-mode acceptEdits",
             shell_quote(&task)
         ),
         // Hintergrund-Terminal: task IST der Shell-Befehl. Gleiche
         // Infrastruktur wie die CLI-Agenten (Streaming, Cancel, Watchdog).
         "shell" => {
             crate::shell_safety::validate_shell_command(&task)?;
-            task.clone()
+            format!("{CLI_PATH_SETUP}{task}")
         }
         other => return Err(format!("Unbekannter Agent: {other} (codex, claude oder shell)")),
     };
@@ -264,7 +268,7 @@ pub fn cli_job_cancel(job_id: String) -> Result<Vec<String>, String> {
 pub async fn cli_available() -> Result<serde_json::Value, String> {
     fn has(bin: &str) -> bool {
         Command::new("/bin/zsh")
-            .args(["-lc", &format!("command -v {bin}")])
+            .args(["-lc", &format!("{CLI_PATH_SETUP}command -v {bin}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
