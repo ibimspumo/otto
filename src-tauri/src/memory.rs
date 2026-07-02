@@ -11,6 +11,16 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
 
+fn write_private(path: &std::path::Path, content: impl AsRef<[u8]>) -> Result<(), String> {
+    fs::write(path, content).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 fn memory_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -49,7 +59,7 @@ pub fn memory_note_append(
     };
     let stamp = Local::now().format("%H:%M");
     content = format!("{}\n## {stamp}\n{}\n", content.trim_end(), text);
-    fs::write(&path, content).map_err(|e| e.to_string())
+    write_private(&path, content)
 }
 
 /// Liefert die Tagesnotizen der letzten `days` Tage (inkl. heute) als
@@ -113,5 +123,5 @@ pub fn memory_state_set(
 ) -> Result<(), String> {
     let path = memory_dir(&app)?.join("state.json");
     let raw = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
-    fs::write(&path, raw).map_err(|e| e.to_string())
+    write_private(&path, raw)
 }

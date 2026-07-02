@@ -102,7 +102,10 @@ pub fn cli_job_start(
         ),
         // Hintergrund-Terminal: task IST der Shell-Befehl. Gleiche
         // Infrastruktur wie die CLI-Agenten (Streaming, Cancel, Watchdog).
-        "shell" => task.clone(),
+        "shell" => {
+            crate::shell_safety::validate_shell_command(&task)?;
+            task.clone()
+        }
         other => return Err(format!("Unbekannter Agent: {other} (codex, claude oder shell)")),
     };
     let dir = cwd

@@ -137,7 +137,8 @@ function DropPreview({
         <div className="mini-html" aria-hidden>
           <iframe
             title={`${artifact.title} (Vorschau)`}
-            sandbox="allow-scripts"
+            sandbox=""
+            referrerPolicy="no-referrer"
             tabIndex={-1}
             srcDoc={buildHtmlDoc(artifact.content, artifactStyle)}
           />

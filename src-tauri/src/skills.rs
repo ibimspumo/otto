@@ -10,6 +10,16 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
 
+fn write_private(path: &std::path::Path, content: impl AsRef<[u8]>) -> Result<(), String> {
+    fs::write(path, content).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
 fn skills_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -103,7 +113,7 @@ pub fn skill_write(app: tauri::AppHandle, name: String, content: String) -> Resu
         return Err("Skill zu lang (max. 20 000 Zeichen) — kürze auf das Wesentliche.".into());
     }
     let path = skills_dir(&app)?.join(format!("{name}.md"));
-    fs::write(&path, content).map_err(|e| e.to_string())
+    write_private(&path, content)
 }
 
 #[tauri::command]

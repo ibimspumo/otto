@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { AudioEngine } from "./lib/audio";
-import {
-  hideDrops,
-  hideIsland,
-  showDrops,
-  showIsland,
-  showSettings,
-  toggleIsland,
-} from "./lib/hudWindow";
+import { showSettings } from "./lib/hudWindow";
 import { flushSession, MEMORY_BUDGET_CHARS, runDreaming } from "./lib/memory";
 import { checkForUpdate, installAndRelaunch, type Update } from "./lib/updater";
 import {
@@ -39,6 +31,8 @@ import type {
   TranscriptItem,
 } from "./lib/types";
 import Island from "./components/Island";
+import { useActivation } from "./hooks/useActivation";
+import { usePanelSync } from "./hooks/usePanelSync";
 
 /** Grobes Seitenverhältnis aus "1536x1024" ableiten. */
 function aspectFromSize(size: string): Aspect {
@@ -168,7 +162,7 @@ export default function App() {
           void showSettings("keys");
         }
       })
-      .catch(() => {});
+      .catch((e) => void api.logLine(`settings load failed: ${String(e)}`));
     reloadArtifactStyle();
   }, []);
 
@@ -183,7 +177,7 @@ export default function App() {
           pushActivity("Gedächtnis auf Stand gebracht");
         }
       })
-      .catch(() => {});
+      .catch((e) => void api.logLine(`dreaming failed: ${String(e)}`));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
@@ -243,7 +237,7 @@ export default function App() {
         imagesRef.current = map;
         setImages(map);
       })
-      .catch(() => {});
+      .catch((e) => void api.logLine(`images list failed: ${String(e)}`));
   }, []);
 
   /**
@@ -1349,13 +1343,15 @@ export default function App() {
     sessionIdRef.current = null;
     sessionItemsRef.current = [];
     if (sessionId !== null) {
-      void api.sessionEnd(sessionId).catch(() => {});
+      void api.sessionEnd(sessionId).catch((e) =>
+        api.logLine(`session end failed: ${String(e)}`),
+      );
       const s = settingsRefValue.current;
       if (s) void flushSession(s, sessionId, items);
     }
     const engine = engineRef.current;
     engineRef.current = null;
-    await engine?.stop().catch(() => {});
+    await engine?.stop().catch((e) => void api.logLine(`audio stop failed: ${String(e)}`));
     recompute();
   }, [recompute]);
 
@@ -1482,7 +1478,7 @@ export default function App() {
             .then((id) => {
               sessionIdRef.current = id;
             })
-            .catch(() => {});
+            .catch((e) => void api.logLine(`session start failed: ${String(e)}`));
           // Ergebnisse von Jobs, die ohne Session fertig wurden, nachreichen.
           if (pendingJobResults.current.length > 0) {
             for (const msg of pendingJobResults.current) {
@@ -1539,7 +1535,11 @@ export default function App() {
           if (!text) return;
           sessionItemsRef.current.push({ id: "", role: "user", text, final: true });
           const sid = sessionIdRef.current;
-          if (sid !== null) void api.sessionAppend(sid, "user", text).catch(() => {});
+          if (sid !== null) {
+            void api
+              .sessionAppend(sid, "user", text)
+              .catch((e) => api.logLine(`session append user failed: ${String(e)}`));
+          }
         },
         onAssistantDelta: () => {},
         onAssistantDone: (_itemId, text) => {
@@ -1552,7 +1552,9 @@ export default function App() {
             });
             const sid = sessionIdRef.current;
             if (sid !== null) {
-              void api.sessionAppend(sid, "assistant", text).catch(() => {});
+              void api
+                .sessionAppend(sid, "assistant", text)
+                .catch((e) => api.logLine(`session append assistant failed: ${String(e)}`));
             }
           }
         },
@@ -1596,223 +1598,34 @@ export default function App() {
     };
   }, []);
 
-  // ----------------------------------------------------------------
-  // Aktivierung: Wake Word („Hey Otto“) & globaler Hotkey
-  // ----------------------------------------------------------------
-
-  // Callbacks werden in Events/Effekten über Refs gelesen, damit keine
-  // veralteten Closures hängen bleiben.
-  const connectRef = useRef(connect);
-  const disconnectRef = useRef(disconnect);
-  useEffect(() => {
-    connectRef.current = connect;
-    disconnectRef.current = disconnect;
-  }, [connect, disconnect]);
-
-  const summonAndConnect = useCallback(async () => {
-    if (flags.current.connected || flags.current.connecting) {
-      await showIsland();
-      return;
-    }
-    await showIsland();
-    void connectRef.current();
-  }, []);
-
-  /** Dismiss: Session beenden, die Insel zieht sich in den Notch zurück. */
-  const dismiss = useCallback(async () => {
-    void disconnectRef.current();
-    await hideIsland();
-  }, []);
-
-  // Wake-Word-Erkennung läuft offline (NSSpeechRecognizer), aber nur solange
-  // keine Session aktiv ist — sonst hört Otto doppelt zu.
-  const wakeActive = agentState === "disconnected";
-  useEffect(() => {
-    const enabled = settings?.wake_word_enabled ?? false;
-    const phrase = settings?.wake_word_phrase?.trim() || "Hey Otto";
-    if (enabled && wakeActive) {
-      api.wakeWordStart([phrase]).catch((e) => {
-        pushActivity(`Wake Word nicht verfügbar: ${String(e).slice(0, 80)}`);
-      });
-    } else {
-      api.wakeWordStop().catch(() => {});
-    }
-    return () => {
-      api.wakeWordStop().catch(() => {});
-    };
-  }, [
-    settings?.wake_word_enabled,
-    settings?.wake_word_phrase,
-    wakeActive,
+  const { dismiss } = useActivation({
+    agentState,
+    settings,
+    flags,
+    connect,
+    disconnect,
     pushActivity,
-  ]);
+    setError,
+  });
 
-  useEffect(() => {
-    const un = listen("wake-word", () => {
-      void summonAndConnect();
-    });
-    return () => {
-      un.then((f) => f());
-    };
-  }, [summonAndConnect]);
-
-  // Globaler Hotkey: verbindet (und holt die Insel nach vorn) bzw. trennt.
-  // Spezialfall „2x Cmd“: Modifier-only-Taps kann das Shortcut-Plugin nicht —
-  // dafür läuft ein nativer NSEvent-Monitor in Rust (Event "double-cmd").
-  const isDoubleCmd = (combo: string) =>
-    /^(2x ?cmd|cmd ?cmd|doppel[- ]?cmd|double[- ]?cmd|⌘⌘)$/i.test(combo);
-  useEffect(() => {
-    if (!settings) return;
-    let disposed = false;
-    (async () => {
-      await unregisterAll().catch(() => {});
-      await api.dblcmdStop().catch(() => {});
-      const combo = settings.hotkey?.trim();
-      if (!settings.hotkey_enabled || !combo || disposed) return;
-      if (isDoubleCmd(combo)) {
-        await api.dblcmdStart().catch((e) => {
-          setError(
-            `Doppel-Cmd ließ sich nicht aktivieren: ${String(e)} — braucht die Bedienungshilfen-Freigabe.`,
-          );
-        });
-        return;
-      }
-      try {
-        await register(combo, (event) => {
-          if (event.state !== "Pressed") return;
-          if (flags.current.connected || flags.current.connecting) {
-            void dismiss();
-          } else {
-            void summonAndConnect();
-          }
-        });
-      } catch (e) {
-        setError(`Hotkey „${combo}“ ließ sich nicht registrieren: ${String(e)}`);
-      }
-    })();
-    return () => {
-      disposed = true;
-      void unregisterAll().catch(() => {});
-      void api.dblcmdStop().catch(() => {});
-    };
-  }, [settings, settings?.hotkey, settings?.hotkey_enabled, summonAndConnect, dismiss]);
-
-  // Doppel-Cmd aus dem nativen Monitor: gleiche Wirkung wie der Hotkey.
-  useEffect(() => {
-    const un = listen("double-cmd", () => {
-      if (flags.current.connected || flags.current.connecting) {
-        void dismiss();
-      } else {
-        void summonAndConnect();
-      }
-    });
-    return () => {
-      un.then((f) => f());
-    };
-  }, [dismiss, summonAndConnect]);
-
-  // Tray-Icon: Linksklick toggelt die Insel, Menüpunkte öffnen gezielt.
-  useEffect(() => {
-    const unToggle = listen("tray-toggle", () => {
-      void toggleIsland();
-    });
-    const unConnect = listen("tray-connect", () => {
-      void summonAndConnect();
-    });
-    const unSettings = listen("tray-settings", () => void showSettings("allgemein"));
-    const unFiles = listen("tray-files", () => void showSettings("persona"));
-    return () => {
-      unToggle.then((f) => f());
-      unConnect.then((f) => f());
-      unSettings.then((f) => f());
-      unFiles.then((f) => f());
-    };
-  }, [summonAndConnect]);
-
-  // Escape = Dismiss: Session beenden, Orb verschwindet.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") void dismiss();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [dismiss]);
-
-  // ----------------------------------------------------------------
-  // Drop-Fenster: Sichtbarkeit steuern und Zustand hinüberspiegeln
-  // ----------------------------------------------------------------
-
-  const panelWasOpen = useRef(false);
-  useEffect(() => {
-    if (panelOpen) {
-      void showDrops();
-      // fresh = das Fenster war zu: das Panel setzt sich in den
-      // Stapel-Modus zurück, statt eine alte Quick-Look-Ansicht zu zeigen.
-      void emit("panel-open", { fresh: !panelWasOpen.current });
-      // Vorgemerkter Quick-Look-Wunsch (present_artifact bei zuem Fenster):
-      // NACH panel-open senden, damit der fresh-Reset ihn nicht überschreibt.
-      if (pendingPresent.current) {
-        void emit("panel-present", pendingPresent.current);
-        pendingPresent.current = null;
-      }
-    } else {
-      void hideDrops();
-    }
-    panelWasOpen.current = panelOpen;
-  }, [panelOpen]);
-
-  // Artefakte, Bilder und Stil live ans Panel-Fenster spiegeln.
-  useEffect(() => {
-    void emit("panel-state", {
-      artifacts,
-      activeId: activeArtifactId,
-      images,
-      artifactStyle,
-    });
-  }, [artifacts, activeArtifactId, images, artifactStyle]);
-
-  // Aktionen aus dem Panel-Fenster (Tab-Wechsel, Schließen, Bild-Aktionen).
-  useEffect(() => {
-    const unReady = listen("panel-ready", () => {
-      void emit("panel-state", {
-        artifacts: artifactsRef.current,
-        activeId: activeArtifactIdRef.current,
-        images: imagesRef.current,
-        artifactStyle: artifactStyleRef.current,
-      });
-    });
-    const unClose = listen("panel-close", () => setPanelOpen(false));
-    const unAction = listen<{
-      type: "select" | "close" | "image";
-      id?: string;
-      action?: "favorite" | "delete" | "save";
-    }>("panel-action", (e) => {
-      const p = e.payload;
-      if (p.type === "select" && p.id) {
-        setActiveArtifactId(p.id);
-      } else if (p.type === "close" && p.id) {
-        closeArtifact(p.id);
-      } else if (p.type === "image" && p.id && p.action) {
-        void handleImageAction(p.id, p.action);
-      }
-    });
-    const unStyle = listen("style-changed", () => reloadArtifactStyle());
-    const unSettings = listen("settings-changed", () => {
-      api.getSettings().then(setSettings).catch(() => {});
-    });
-    return () => {
-      unReady.then((f) => f());
-      unClose.then((f) => f());
-      unAction.then((f) => f());
-      unStyle.then((f) => f());
-      unSettings.then((f) => f());
-    };
-  }, [closeArtifact, handleImageAction]);
-
-  /** Insel-Button: Drop-Stapel zeigen bzw. verbergen. */
-  const toggleArtifactsWindow = useCallback(() => {
-    setPanelOpen((open) => !open);
-  }, []);
+  const toggleArtifactsWindow = usePanelSync({
+    panelOpen,
+    setPanelOpen,
+    pendingPresent,
+    artifacts,
+    activeArtifactId,
+    images,
+    artifactStyle,
+    artifactsRef,
+    activeArtifactIdRef,
+    imagesRef,
+    artifactStyleRef,
+    setActiveArtifactId,
+    setSettings,
+    closeArtifact,
+    handleImageAction,
+    reloadArtifactStyle,
+  });
 
   return (
     <Island

@@ -239,7 +239,8 @@ export function ArtifactBody({
         <div className="ql-html">
           <iframe
             title={artifact.title}
-            sandbox="allow-scripts"
+            sandbox=""
+            referrerPolicy="no-referrer"
             srcDoc={buildHtmlDoc(artifact.content, artifactStyle)}
           />
         </div>

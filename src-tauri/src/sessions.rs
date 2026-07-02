@@ -31,7 +31,13 @@ fn with_conn<T>(
     if guard.is_none() {
         let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let conn = Connection::open(dir.join("sessions.db")).map_err(|e| e.to_string())?;
+        let db_path = dir.join("sessions.db");
+        let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o600));
+        }
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              CREATE TABLE IF NOT EXISTS sessions(

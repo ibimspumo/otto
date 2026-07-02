@@ -112,7 +112,8 @@ export async function flushSession(
   try {
     await flushTranscript(settings, transcriptToText(finals));
     if (sessionId !== null) await api.sessionMarkProcessed(sessionId);
-  } catch {
+  } catch (e) {
+    void api.logLine(`memory flush failed: ${String(e)}`);
     // Fehlgeschlagen (z. B. offline): Session bleibt unverarbeitet,
     // der Catch-up beim nächsten App-Start holt den Flush nach.
   }
@@ -153,11 +154,13 @@ export async function runDreaming(
         await flushTranscript(settings, s.transcript, msToDate(s.started_ms));
         await api.sessionMarkProcessed(s.id);
         report.flushed += 1;
-      } catch {
+      } catch (e) {
+        void api.logLine(`dreaming catch-up flush failed: ${String(e)}`);
         break; // offline o. Ä. — nächster App-Start versucht es erneut
       }
     }
-  } catch {
+  } catch (e) {
+    void api.logLine(`dreaming catch-up unavailable: ${String(e)}`);
     // Ohne DB-Zugriff kein Catch-up.
   }
 
@@ -203,7 +206,8 @@ export async function runDreaming(
         last_consolidation_ms: Date.now(),
       });
     }
-  } catch {
+  } catch (e) {
+    void api.logLine(`dreaming consolidation failed: ${String(e)}`);
     // Konsolidierung ist Komfort — nie die App stören.
   }
 
@@ -212,7 +216,8 @@ export async function runDreaming(
     const days = settings.session_retention_days || 30;
     report.cleaned = await api.sessionsCleanup(days);
     await api.memoryNotesCleanup(Math.max(days, 30));
-  } catch {
+  } catch (e) {
+    void api.logLine(`dreaming cleanup failed: ${String(e)}`);
     // Aufräumen darf still scheitern.
   }
   return report;

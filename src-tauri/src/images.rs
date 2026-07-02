@@ -4,6 +4,7 @@
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
@@ -62,7 +63,14 @@ fn load_index(dir: &PathBuf) -> Vec<ImageMeta> {
 
 fn save_index(dir: &PathBuf, index: &[ImageMeta]) -> Result<(), String> {
     let raw = serde_json::to_string_pretty(index).map_err(|e| e.to_string())?;
-    fs::write(dir.join("index.json"), raw).map_err(|e| e.to_string())
+    let path = dir.join("index.json");
+    fs::write(&path, raw).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 fn with_paths(dir: &PathBuf, mut index: Vec<ImageMeta>) -> Vec<ImageMeta> {
@@ -70,6 +78,56 @@ fn with_paths(dir: &PathBuf, mut index: Vec<ImageMeta>) -> Vec<ImageMeta> {
         m.path = dir.join(&m.file).to_string_lossy().into_owned();
     }
     index
+}
+
+fn is_private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.octets()[0] == 0
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+        }
+    }
+}
+
+fn validate_import_url(src: &str) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(src).map_err(|_| "Ungültige Bild-URL.".to_string())?;
+    match url.scheme() {
+        "https" => {}
+        "http" => return Err("Bildimport per http ist blockiert; nutze https.".into()),
+        _ => return Err("Nur https-Bild-URLs sind erlaubt.".into()),
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "Bild-URL hat keinen Host.".to_string())?;
+    if matches!(host, "localhost" | "127.0.0.1" | "::1") || host.ends_with(".local") {
+        return Err("Bildimport von lokalen Hosts ist blockiert.".into());
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(ip) {
+            return Err("Bildimport aus privaten/lokalen Netzen ist blockiert.".into());
+        }
+    } else {
+        let port = url.port_or_known_default().unwrap_or(443);
+        let addrs = (host, port)
+            .to_socket_addrs()
+            .map_err(|_| "Host der Bild-URL konnte nicht aufgelöst werden.".to_string())?;
+        for addr in addrs {
+            if is_private_ip(addr.ip()) {
+                return Err("Bildimport aus privaten/lokalen Netzen ist blockiert.".into());
+            }
+        }
+    }
+    Ok(url)
 }
 
 #[tauri::command]
@@ -89,7 +147,13 @@ fn store_bytes(
 ) -> Result<ImageMeta, String> {
     let dir = images_dir(app)?;
     let file = format!("{id}.png");
-    fs::write(dir.join(&file), bytes).map_err(|e| e.to_string())?;
+    let image_path = dir.join(&file);
+    fs::write(&image_path, bytes).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&image_path, fs::Permissions::from_mode(0o600));
+    }
 
     let created_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -141,11 +205,22 @@ pub async fn image_import(
     let src = source.trim().to_string();
 
     let bytes: Vec<u8> = if src.starts_with("http://") || src.starts_with("https://") {
-        let resp = reqwest::get(&src)
+        let url = validate_import_url(&src)?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::limited(3))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client
+            .get(url)
+            .send()
             .await
             .map_err(|e| format!("Download fehlgeschlagen: {e}"))?;
         if !resp.status().is_success() {
             return Err(format!("Download fehlgeschlagen: HTTP {}", resp.status()));
+        }
+        if resp.content_length().unwrap_or(0) > 50_000_000 {
+            return Err("Bild ist größer als 50 MB.".into());
         }
         let data = resp.bytes().await.map_err(|e| e.to_string())?;
         if data.len() > 50_000_000 {
@@ -172,7 +247,11 @@ pub async fn image_import(
 
     // Komprimieren/konvertieren via sips (blockierend → eigener Thread).
     let processed = tauri::async_runtime::spawn_blocking(move || -> Result<(Vec<u8>, String), String> {
-        let dir = std::env::temp_dir().join("otto-import");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("otto-import-{unique}"));
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let raw = dir.join("raw");
         let out = dir.join("import.png");
@@ -211,6 +290,7 @@ pub async fn image_import(
             })
             .unwrap_or_default();
         let data = fs::read(&out).map_err(|e| e.to_string())?;
+        let _ = fs::remove_dir_all(&dir);
         Ok((data, size))
     })
     .await
