@@ -167,6 +167,21 @@ export default function App() {
     reloadArtifactStyle();
   }, []);
 
+  // App-Identität prüfen: läuft Otto aus einer translozierten Kopie, merkt
+  // sich macOS keine Freigaben — ein deutlicher Hinweis mit Handlungsempfehlung.
+  useEffect(() => {
+    api
+      .appDiagnostics()
+      .then((d) => {
+        if (d.translocated) {
+          setError(
+            "Otto läuft aus einer Kopie ohne feste Identität (App Translocation). Verschiebe Otto per Finder in „Programme“, entferne die Quarantäne und starte neu — sonst merkt sich macOS keine Freigaben. Details unter Einstellungen → Diagnose.",
+          );
+        }
+      })
+      .catch((e) => void api.logLine(`diagnostics failed: ${String(e)}`));
+  }, []);
+
   // „Dreaming“: einmal pro App-Start im Hintergrund verpasste Memory-
   // Flushes nachholen, fällige Konsolidierung fahren und aufräumen.
   useEffect(() => {

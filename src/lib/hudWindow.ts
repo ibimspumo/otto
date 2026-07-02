@@ -228,6 +228,7 @@ export type SettingsSection =
   | "bilder"
   | "gedaechtnis"
   | "faehigkeiten"
+  | "diagnose"
   | "persona";
 
 export async function showSettings(section?: SettingsSection): Promise<void> {

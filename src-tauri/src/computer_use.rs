@@ -57,6 +57,8 @@ pub async fn run_computer_use(
     if api_key.trim().is_empty() {
         return Err("Kein OpenAI-API-Key hinterlegt.".into());
     }
+    // Nur die installierte /Applications-Kopie bekommt dauerhafte TCC-Freigaben.
+    crate::diagnostics::computer_use_location_guard()?;
     ensure_permissions()?;
     let model = model
         .filter(|m| !m.trim().is_empty())

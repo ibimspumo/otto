@@ -21,6 +21,7 @@ const NAV: { id: SettingsSection; label: string; glyph: string }[] = [
   { id: "bilder", label: "Bilder", glyph: "▣" },
   { id: "gedaechtnis", label: "Gedächtnis", glyph: "✎" },
   { id: "faehigkeiten", label: "Fähigkeiten", glyph: "⌘" },
+  { id: "diagnose", label: "Diagnose", glyph: "✦" },
   { id: "persona", label: "Persona", glyph: "☰" },
 ];
 

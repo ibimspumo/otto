@@ -1,5 +1,5 @@
 import type { Update } from "../../lib/updater";
-import type { Settings } from "../../lib/types";
+import type { Diagnostics, Settings } from "../../lib/types";
 import type { ImageModelInfo } from "../../lib/imagegen";
 import { Group, KeyInput, Row, Switch } from "./SettingsControls";
 
@@ -315,6 +315,117 @@ export function MemorySettings({ form, set }: SectionProps) {
         />
       </Row>
     </Group>
+  );
+}
+
+function yesNo(v: boolean | null): string {
+  if (v === null) return "unbekannt";
+  return v ? "ja" : "nein";
+}
+
+export function DiagnosticsSettings({
+  diag,
+  onRefresh,
+}: {
+  diag: Diagnostics | null;
+  onRefresh: () => void;
+}) {
+  if (!diag) {
+    return (
+      <Group title="App-Identität">
+        <Row label="Status" hint="Diagnose wird geladen…">
+          <button className="push" type="button" onClick={onRefresh}>
+            Aktualisieren
+          </button>
+        </Row>
+      </Group>
+    );
+  }
+
+  // Läuft Otto NICHT aus /Applications und ist es auch keine Dev-Binary, ist
+  // das der klassische „direkt aus dem Download gestartet“-Fall.
+  const misplaced = !diag.in_applications && !diag.dev_build;
+  const location = diag.translocated
+    ? "App Translocation — Kopie ohne feste Identität"
+    : diag.in_applications
+      ? "im Ordner „Programme“ (/Applications) ✓"
+      : diag.dev_build
+        ? "Dev-/Debug-Version (nicht die installierte App)"
+        : "außerhalb von /Applications";
+
+  return (
+    <>
+      <Group title="App-Identität & Laufumgebung">
+        <Row
+          label="Standort"
+          hint={
+            diag.translocated || misplaced
+              ? "Ohne feste Identität in /Applications merkt sich macOS keine Freigaben — siehe die Schritte unten."
+              : "Alles in Ordnung."
+          }
+        >
+          <span className="mono">{location}</span>
+        </Row>
+        <Row label="Programm-Pfad" hint="Aktueller Ort der laufenden Otto-Binary.">
+          <span className="mono" style={{ wordBreak: "break-all" }}>
+            {diag.bundle_path ?? diag.exe_path}
+          </span>
+        </Row>
+        <Row label="Bundle-ID" hint="An diese Identität hängt macOS die Freigaben.">
+          <span className="mono">{diag.bundle_id}</span>
+        </Row>
+        <Row label="Quarantäne" hint="Vom Download/DMG gesetztes Gatekeeper-Attribut.">
+          <span className="mono">{yesNo(diag.quarantined)}</span>
+        </Row>
+        <Row
+          label="Freigaben (Vorprüfung)"
+          hint="Ohne Dialog geprüft — löst keine Systemabfrage aus."
+        >
+          <span className="mono">
+            Bildschirmaufnahme: {diag.screen_access ? "✓" : "✗"} · Bedienungshilfen:{" "}
+            {diag.accessibility ? "✓" : "✗"}
+          </span>
+        </Row>
+        <Row label="Neu prüfen" hint="Nach dem Verschieben/Neustart hier erneut prüfen.">
+          <button className="push" type="button" onClick={onRefresh}>
+            Aktualisieren
+          </button>
+        </Row>
+      </Group>
+
+      <Group title="Wenn Freigaben nicht greifen — so geht's (ohne Signatur)">
+        <Row
+          wide
+          label="1 · App aus „Programme“ starten"
+          hint="Otto per Finder nach /Applications ziehen und von dort öffnen. Nur eine App an einem festen Ort bekommt dauerhafte Freigaben — eine direkt aus dem Download/DMG gestartete Kopie läuft aus einem zufälligen, schreibgeschützten Pfad (App Translocation) und verliert alles beim Neustart."
+        >
+          <span className="row-hint">Finder → Otto nach „Programme“ ziehen</span>
+        </Row>
+        <Row
+          wide
+          label="2 · Quarantäne entfernen"
+          hint="Beim ersten Start Rechtsklick auf Otto → „Öffnen“ (nicht Doppelklick) und den Gatekeeper-Dialog bestätigen. Alternativ im Terminal: xattr -cr /Applications/Otto.app"
+        >
+          <span className="mono">xattr -cr /Applications/Otto.app</span>
+        </Row>
+        <Row
+          wide
+          label="3 · Freigaben anfordern"
+          hint="Unter Einstellungen → Fähigkeiten den Knopf „Anfordern“ nutzen; er löst die macOS-Abfragen für „Bildschirmaufnahme“ und „Bedienungshilfen“ aus. Danach Otto einmal neu starten."
+        >
+          <span className="row-hint">Einstellungen → Fähigkeiten → „Anfordern“</span>
+        </Row>
+        <Row
+          wide
+          label="4 · TCC zurücksetzen (nur im Notfall)"
+          hint="Sind noch alte Freigaben einer früheren Kopie hängen geblieben, im Terminal zurücksetzen und Otto neu starten. Setzt nur die Freigaben von Otto zurück, sonst nichts."
+        >
+          <span className="mono" style={{ wordBreak: "break-all" }}>
+            {`tccutil reset ScreenCapture ${diag.bundle_id}; tccutil reset Accessibility ${diag.bundle_id}`}
+          </span>
+        </Row>
+      </Group>
+    </>
   );
 }
 

@@ -15,6 +15,23 @@ mod tcc {
     }
 }
 
+/// Reine Preflight-Prüfung OHNE Nutzer-Dialog: löst KEINE TCC-Abfrage aus,
+/// meldet nur den aktuellen Stand. `(bildschirmaufnahme, bedienungshilfen)`.
+/// Wird für Diagnose/Logging und den Computer-Use-Standort-Check genutzt.
+pub fn preflight() -> (bool, bool) {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        (
+            tcc::CGPreflightScreenCaptureAccess(),
+            tcc::AXIsProcessTrusted(),
+        )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        (true, true)
+    }
+}
+
 /// Prüft (und fordert auf Wunsch an) die Systemfreigaben für Computer Use.
 /// `request = true` löst den macOS-Dialog für Bildschirmaufnahme aus und
 /// öffnet die Bedienungshilfen-Einstellungen, falls nötig.
@@ -43,9 +60,8 @@ pub fn cu_permissions(request: bool) -> Result<serde_json::Value, String> {
 
 pub fn ensure_permissions() -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    unsafe {
-        let screen = tcc::CGPreflightScreenCaptureAccess();
-        let accessibility = tcc::AXIsProcessTrusted();
+    {
+        let (screen, accessibility) = preflight();
         if !screen || !accessibility {
             let mut missing = Vec::new();
             if !screen {

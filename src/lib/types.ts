@@ -31,6 +31,22 @@ export interface Settings {
 }
 
 
+/**
+ * App-Identität & TCC-Vorprüfung (aus Rust). Grundlage für den
+ * Translocation-Hinweis und den Diagnose-Abschnitt der Einstellungen.
+ */
+export interface Diagnostics {
+  exe_path: string;
+  bundle_path: string | null;
+  bundle_id: string;
+  translocated: boolean;
+  in_applications: boolean;
+  dev_build: boolean;
+  quarantined: boolean | null;
+  screen_access: boolean;
+  accessibility: boolean;
+}
+
 /** Skill-Metadaten für die Progressive Disclosure (Name + Beschreibung). */
 export interface SkillInfo {
   name: string;

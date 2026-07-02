@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Diagnostics,
   ImageMeta,
   SearchResult,
   SessionSearchHit,
@@ -9,6 +10,9 @@ import type {
 } from "./types";
 
 export const getSettings = () => invoke<Settings>("get_settings");
+
+/** App-Identität & TCC-Vorprüfung (Translocation, /Applications, Freigaben). */
+export const appDiagnostics = () => invoke<Diagnostics>("app_diagnostics");
 
 /** Doppel-Cmd-Erkennung (globaler NSEvent-Monitor) starten/stoppen. */
 export const dblcmdStart = () => invoke<void>("dblcmd_start");

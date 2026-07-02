@@ -1,6 +1,7 @@
 mod agent_files;
 mod cli;
 mod computer_use;
+mod diagnostics;
 mod fs_util;
 mod images;
 mod logging;
@@ -40,6 +41,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             tray::setup(app.handle())?;
+            // App-Identität & TCC-Vorprüfung protokollieren — macht spätere
+            // Freigabe-Probleme (Translocation, Dev-Binary) nachvollziehbar.
+            diagnostics::log_startup(app.handle());
             // Einstellungsfenster: Sidebar-Vibrancy über die ganze Fläche —
             // die Seitenleiste bleibt im CSS transparent (echtes Glas), der
             // Inhaltsbereich bekommt eine solide Fläche darüber.
@@ -75,6 +79,7 @@ pub fn run() {
             computer_use::run_computer_use,
             computer_use::permissions::cu_permissions,
             computer_use::cu_cancel,
+            diagnostics::app_diagnostics,
             terminal::run_terminal,
             window_effects::panel_vibrancy,
             logging::log_line,

@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { cliAvailable, cuPermissions, logLine, saveSettings } from "../lib/tauriApi";
+import {
+  appDiagnostics,
+  cliAvailable,
+  cuPermissions,
+  logLine,
+  saveSettings,
+} from "../lib/tauriApi";
 import { fetchImageModels, IMAGE_MODELS, type ImageModelInfo } from "../lib/imagegen";
 import { checkForUpdate, installAndRelaunch, type Update } from "../lib/updater";
 import type { SettingsSection } from "../lib/hudWindow";
-import type { Settings } from "../lib/types";
+import type { Diagnostics, Settings } from "../lib/types";
 import {
   ActivationSettings,
   CapabilitySettings,
+  DiagnosticsSettings,
   GeneralSettings,
   ImageSettings,
   KeySettings,
@@ -46,6 +53,7 @@ export default function SettingsPanel({
   );
   const [modelFilter, setModelFilter] = useState("");
   const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [diag, setDiag] = useState<Diagnostics | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -63,6 +71,17 @@ export default function SettingsPanel({
   useEffect(() => {
     setForm(settings);
   }, [settings]);
+
+  const refreshDiag = () => {
+    appDiagnostics()
+      .then(setDiag)
+      .catch((e) => void logLine(`diagnostics failed: ${String(e)}`));
+  };
+
+  useEffect(() => {
+    if (section === "diagnose" && !diag) refreshDiag();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section]);
 
   useEffect(() => {
     const key = settings?.openrouter_api_key ?? "";
@@ -181,6 +200,8 @@ export default function SettingsPanel({
             onCheckPermissions={() => void checkPermissions()}
           />
         );
+      case "diagnose":
+        return <DiagnosticsSettings diag={diag} onRefresh={refreshDiag} />;
     }
   })();
 
