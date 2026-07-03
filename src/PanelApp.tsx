@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
   ArtifactBody,
-  buildHtmlDoc,
   Favicon,
+  HtmlArtifactFrame,
   MarkdownBody,
   safeHost,
   type ImageAction,
@@ -153,12 +153,11 @@ function DropPreview({
       // Die Seite selbst, auf ein Drittel verkleinert — keine Interaktion.
       return (
         <div className="mini-html" aria-hidden>
-          <iframe
+          <HtmlArtifactFrame
             title={`${artifact.title} (Vorschau)`}
-            sandbox=""
-            referrerPolicy="no-referrer"
+            content={artifact.content}
+            artifactStyle={artifactStyle}
             tabIndex={-1}
-            srcDoc={buildHtmlDoc(artifact.content, artifactStyle)}
           />
         </div>
       );

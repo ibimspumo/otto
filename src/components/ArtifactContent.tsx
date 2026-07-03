@@ -3,7 +3,7 @@
 // Grundsatz: Jeder Artefakt-Typ wird ECHT gerendert (HTML als Seite,
 // Markdown als Dokument), nie als Rohtext-Ausschnitt.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -76,6 +76,9 @@ th { color: var(--ink-2); font-size: 0.78rem; font-weight: 600; }
 export function buildHtmlDoc(content: string, css: string): string {
   const head = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style data-otto-base>${HTML_BASE_STYLE}</style>${css.trim() ? `<style data-otto-style>${css}</style>` : ""}`;
   if (/<head[\s>]/i.test(content)) {
+    if (/<\/head>/i.test(content)) {
+      return content.replace(/<\/head>/i, `${head}</head>`);
+    }
     return content.replace(/<head([^>]*)>/i, `<head$1>${head}`);
   }
   if (/<html[\s>]/i.test(content)) {
@@ -85,6 +88,41 @@ export function buildHtmlDoc(content: string, css: string): string {
     return content.replace(/<body([^>]*)>/i, `<head>${head}</head><body$1>`);
   }
   return `<!doctype html><html><head>${head}</head><body>${content}</body></html>`;
+}
+
+export function HtmlArtifactFrame({
+  title,
+  content,
+  artifactStyle,
+  tabIndex,
+}: {
+  title: string;
+  content: string;
+  artifactStyle: string;
+  tabIndex?: number;
+}) {
+  const html = useMemo(
+    () => buildHtmlDoc(content, artifactStyle),
+    [content, artifactStyle],
+  );
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const nextUrl = URL.createObjectURL(blob);
+    setUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [html]);
+
+  return (
+    <iframe
+      title={title}
+      sandbox=""
+      referrerPolicy="no-referrer"
+      tabIndex={tabIndex}
+      src={url}
+    />
+  );
 }
 
 /** Links aus Artefakten öffnen immer im Standard-Browser. */
@@ -299,11 +337,10 @@ export function ArtifactBody({
     case "html":
       return (
         <div className="ql-html">
-          <iframe
+          <HtmlArtifactFrame
             title={artifact.title}
-            sandbox=""
-            referrerPolicy="no-referrer"
-            srcDoc={buildHtmlDoc(artifact.content, artifactStyle)}
+            content={artifact.content}
+            artifactStyle={artifactStyle}
           />
         </div>
       );

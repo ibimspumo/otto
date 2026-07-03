@@ -613,14 +613,24 @@ export default function App() {
               key,
               typeof args.count === "number" ? args.count : undefined,
             );
-            const artifactId = addArtifact({
-              title: `Suche: ${res.query}`,
-              kind: "search",
-              content: res.query,
+            let artifactId: string | undefined;
+            if (args.show_results === true) {
+              artifactId = addArtifact({
+                title: `Recherchequellen: ${res.query}`,
+                kind: "search",
+                content: res.query,
+                results: res.results,
+              });
+              presentArtifact("gross", artifactId);
+            }
+            out = {
+              ok: true,
+              query: res.query,
               results: res.results,
-            });
-            presentArtifact("gross", artifactId);
-            out = { ok: true, artifact_id: artifactId, results: res.results };
+              artifact_id: artifactId,
+              next_step:
+                "Erstelle jetzt ein gestaltetes HTML-Artefakt mit create_artifact(kind=\"html\", present=true), das die Recherche auswertet, strukturiert und Quellen verlinkt.",
+            };
             break;
           }
           case "toggle_artifact_panel": {
