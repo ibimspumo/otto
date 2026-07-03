@@ -8,7 +8,6 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
     ("SOUL.md", include_str!("../defaults/SOUL.md")),
     ("USER.md", include_str!("../defaults/USER.md")),
     ("MEMORY.md", include_str!("../defaults/MEMORY.md")),
-    ("STYLE.css", include_str!("../defaults/STYLE.css")),
 ];
 
 fn agent_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -53,7 +52,7 @@ pub fn list_agent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| n != "TOOLS.md" && (n.ends_with(".md") || n.ends_with(".css")))
         .collect();
-    let order = ["SOUL.md", "USER.md", "MEMORY.md", "STYLE.css"];
+    let order = ["SOUL.md", "USER.md", "MEMORY.md"];
     names.sort_by_key(|n| {
         let rank = order.iter().position(|o| o == n).unwrap_or(usize::MAX);
         (rank, n.clone())

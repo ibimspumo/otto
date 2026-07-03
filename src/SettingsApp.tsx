@@ -74,7 +74,7 @@ export default function SettingsApp() {
         </header>
         <div className="settings-scroll">
           {section === "persona" ? (
-            <FilesPanel onStyleChanged={() => void emit("style-changed", {})} />
+            <FilesPanel />
           ) : (
             <SettingsPanel
               section={section}

@@ -3,7 +3,12 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { AudioEngine } from "./lib/audio";
 import { showSettings } from "./lib/hudWindow";
-import { flushSession, MEMORY_BUDGET_CHARS, runDreaming } from "./lib/memory";
+import {
+  flushSession,
+  MEMORY_BUDGET_CHARS,
+  runDreaming,
+  type MemoryNotice,
+} from "./lib/memory";
 import { checkForUpdate, installAndRelaunch, type Update } from "./lib/updater";
 import {
   editImages,
@@ -132,6 +137,17 @@ function buildCodexImageTask(opts: {
   return lines.join("\n");
 }
 
+function memoryNoticeLabel(notice: MemoryNotice): string {
+  switch (notice) {
+    case "session_note":
+      return "Tagesnotiz ergänzt";
+    case "catchup_note":
+      return "Gedächtnis-Notiz nachgetragen";
+    case "longterm_updated":
+      return "Langzeitgedächtnis aktualisiert";
+  }
+}
+
 export default function App() {
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -139,7 +155,6 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
 
-  const [artifactStyle, setArtifactStyle] = useState("");
   // Das Drop-Fenster ist ein eigenes Fenster; hier lebt nur die Steuerung.
   // Ergebnisse erscheinen als Drop-Stapel unten links; die Quick-Look-
   // Vergrößerung orchestriert das Panel-Fenster selbst.
@@ -149,6 +164,7 @@ export default function App() {
   // kurzer Zeit von selbst, damit nie veralteter Status kleben bleibt.
   const [activity, setActivity] = useState<string | null>(null);
   const activityTs = useRef(0);
+  const activityTtlMs = useRef(8_000);
   const [jobs, setJobs] = useState<CliJob[]>([]);
   const jobsRef = useRef<CliJob[]>([]);
   const finalizedJobsRef = useRef<Set<string>>(new Set());
@@ -188,12 +204,10 @@ export default function App() {
   }
   const panelOpenRef = useRef(false);
   const activeArtifactIdRef = useRef<string | null>(null);
-  const artifactStyleRef = useRef("");
   useEffect(() => {
     panelOpenRef.current = panelOpen;
     activeArtifactIdRef.current = activeArtifactId;
-    artifactStyleRef.current = artifactStyle;
-  }, [panelOpen, activeArtifactId, artifactStyle]);
+  }, [panelOpen, activeArtifactId]);
 
   /**
    * Otto zeigt etwas: Der Drop-Stapel erscheint unten links — unaufdringlich,
@@ -266,7 +280,6 @@ export default function App() {
         }
       })
       .catch((e) => void api.logLine(`settings load failed: ${String(e)}`));
-    reloadArtifactStyle();
   }, []);
 
   // App-Identität prüfen: läuft Otto aus einer translozierten Kopie, merkt
@@ -297,10 +310,11 @@ export default function App() {
       if (!s || dreamingBusyRef.current) return;
       dreamingBusyRef.current = true;
       try {
-        const r = await runDreaming(s, pushActivity);
-        if (r.flushed > 0 || r.consolidated) {
-          pushActivity("Gedächtnis auf Stand gebracht");
-        }
+        await runDreaming(
+          s,
+          pushActivity,
+          (notice) => pushActivity(memoryNoticeLabel(notice), 5_000),
+        );
       } catch (e) {
         void api.logLine(`dreaming failed: ${String(e)}`);
       } finally {
@@ -313,14 +327,8 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
-  function reloadArtifactStyle() {
-    api
-      .readAgentFile("STYLE.css")
-      .then(setArtifactStyle)
-      .catch(() => setArtifactStyle(""));
-  }
-
-  const pushActivity = useCallback((text: string) => {
+  const pushActivity = useCallback((text: string, ttlMs = 8_000) => {
+    activityTtlMs.current = ttlMs;
     activityTs.current = Date.now();
     setActivity(text);
   }, []);
@@ -344,7 +352,7 @@ export default function App() {
       }
       setActivity(null);
     };
-    let timer = setTimeout(tick, 8_000);
+    let timer = setTimeout(tick, activityTtlMs.current);
     return () => clearTimeout(timer);
   }, [activity]);
 
@@ -2176,7 +2184,7 @@ export default function App() {
               break;
             }
             await api.writeAgentFile("MEMORY.md", next);
-            pushActivity("merkt sich etwas (MEMORY.md)");
+            pushActivity("dauerhaft gemerkt", 5_000);
             out = { ok: true };
             break;
           }
@@ -2194,7 +2202,7 @@ export default function App() {
               break;
             }
             await api.writeAgentFile("MEMORY.md", `${content}\n`);
-            pushActivity("konsolidiert MEMORY.md");
+            pushActivity("Langzeitgedächtnis aktualisiert", 5_000);
             out = { ok: true, zeichen: content.length };
             break;
           }
@@ -2355,7 +2363,9 @@ export default function App() {
       if (s) {
         // Promise merken: Beim Quit übers Tray wird darauf (begrenzt)
         // gewartet, damit der letzte Memory-Flush nicht verloren geht.
-        lastFlushRef.current = flushSession(s, sessionId, items);
+        lastFlushRef.current = flushSession(s, sessionId, items, (notice) =>
+          pushActivity(memoryNoticeLabel(notice), 5_000),
+        );
       }
     }
     const engine = engineRef.current;
@@ -2719,19 +2729,16 @@ export default function App() {
     activeArtifactId,
     images,
     imageFolders,
-    artifactStyle,
     artifactsRef,
     activeArtifactIdRef,
     imagesRef,
     imageFoldersRef,
-    artifactStyleRef,
     setActiveArtifactId,
     setSettings,
     closeArtifact,
     handleImageAction,
     handleOpenImage,
     handleGalleryFolder,
-    reloadArtifactStyle,
   });
 
   return (

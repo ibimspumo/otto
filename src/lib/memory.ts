@@ -40,6 +40,13 @@ Regeln:
 
 export const DEFAULT_MEMORY_MODEL = "google/gemini-3.1-flash-lite";
 
+export type MemoryNotice =
+  | "session_note"
+  | "catchup_note"
+  | "longterm_updated";
+
+export type MemoryNoticeHandler = (notice: MemoryNotice) => void;
+
 /** Modelle mit "/" laufen über OpenRouter, alle anderen über OpenAI. */
 function memoryModel(settings: Settings): string {
   return settings.memory_model?.trim() || DEFAULT_MEMORY_MODEL;
@@ -145,6 +152,7 @@ export async function flushSession(
   settings: Settings,
   sessionId: number | null,
   items: TranscriptItem[],
+  onNotice?: MemoryNoticeHandler,
 ): Promise<void> {
   if (!settings.memory_enabled || !memoryApiKey(settings)) return;
   const finals = items.filter((t) => t.final && t.text.trim());
@@ -154,7 +162,8 @@ export async function flushSession(
     return;
   }
   try {
-    await flushTranscript(settings, transcriptToText(finals));
+    const wroteNote = await flushTranscript(settings, transcriptToText(finals));
+    if (wroteNote) onNotice?.("session_note");
     if (sessionId !== null) await api.sessionMarkProcessed(sessionId);
   } catch (e) {
     void api.logLine(`memory flush failed: ${String(e)}`);
@@ -188,6 +197,7 @@ export interface DreamingReport {
 export async function runDreaming(
   settings: Settings,
   onStatus?: (text: string) => void,
+  onNotice?: MemoryNoticeHandler,
 ): Promise<DreamingReport> {
   const report: DreamingReport = { flushed: 0, consolidated: false, cleaned: 0 };
   if (!settings.memory_enabled || !memoryApiKey(settings)) return report;
@@ -203,9 +213,14 @@ export async function runDreaming(
       }
       onStatus?.("holt Gedächtnis-Notizen nach…");
       try {
-        await flushTranscript(settings, s.transcript, msToDate(s.started_ms));
+        const wroteNote = await flushTranscript(
+          settings,
+          s.transcript,
+          msToDate(s.started_ms),
+        );
         await api.sessionMarkProcessed(s.id);
         report.flushed += 1;
+        if (wroteNote) onNotice?.("catchup_note");
       } catch (e) {
         void api.logLine(`dreaming catch-up flush failed: ${String(e)}`);
         break; // offline o. Ä. — nächster App-Start versucht es erneut
@@ -238,20 +253,29 @@ export async function runDreaming(
           memory_md?: string;
           user_md?: string;
         };
+        let changed = false;
         // Nur plausible Ergebnisse übernehmen — nie Dateien leeren.
         if (
           typeof parsed.memory_md === "string" &&
           parsed.memory_md.trim().length > 20
         ) {
+          const nextMemory =
+            parsed.memory_md.slice(0, MEMORY_BUDGET_CHARS + 400).trim() + "\n";
+          changed ||= nextMemory !== memoryMd;
           await api.writeAgentFile(
             "MEMORY.md",
-            parsed.memory_md.slice(0, MEMORY_BUDGET_CHARS + 400).trim() + "\n",
+            nextMemory,
           );
         }
         if (typeof parsed.user_md === "string" && parsed.user_md.trim().length > 20) {
-          await api.writeAgentFile("USER.md", parsed.user_md.trim() + "\n");
+          const nextUser = parsed.user_md.trim() + "\n";
+          changed ||= nextUser !== userMd;
+          await api.writeAgentFile("USER.md", nextUser);
         }
-        report.consolidated = true;
+        if (changed) {
+          onNotice?.("longterm_updated");
+        }
+        report.consolidated = changed;
       }
       await api.memoryStateSet({
         ...state,

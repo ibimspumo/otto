@@ -6,11 +6,7 @@ import {
   writeAgentFile,
 } from "../lib/tauriApi";
 
-interface FilesPanelProps {
-  onStyleChanged: () => void;
-}
-
-export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
+export default function FilesPanel() {
   const [files, setFiles] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [content, setContent] = useState("");
@@ -44,12 +40,7 @@ export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
     try {
       await writeAgentFile(active, content);
       setDirty(false);
-      if (active === "STYLE.css") {
-        onStyleChanged();
-        setStatus("Gespeichert — Design-Datei aktualisiert.");
-      } else {
-        setStatus("Gespeichert — gilt ab der nächsten Verbindung.");
-      }
+      setStatus("Gespeichert — gilt ab der nächsten Verbindung.");
     } catch (e) {
       setStatus(String(e));
     }
