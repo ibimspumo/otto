@@ -27,7 +27,9 @@ import type {
   AgentState,
   Artifact,
   ArtifactKind,
+  CliDonePayload,
   CliJob,
+  ImageFolder,
   ImageMeta,
   ImageState,
   Settings,
@@ -149,10 +151,14 @@ export default function App() {
   const activityTs = useRef(0);
   const [jobs, setJobs] = useState<CliJob[]>([]);
   const jobsRef = useRef<CliJob[]>([]);
+  const finalizedJobsRef = useRef<Set<string>>(new Set());
   // Job-Ergebnisse, die fertig wurden, während keine Session lief.
   const pendingJobResults = useRef<string[]>([]);
   const [images, setImages] = useState<Record<string, ImageState>>({});
   const imagesRef = useRef<Record<string, ImageState>>({});
+  const [imageFolders, setImageFolders] = useState<ImageFolder[]>([]);
+  const imageFoldersRef = useRef<ImageFolder[]>([]);
+  const activeImageFolderIdRef = useRef<string | null>(null);
   const [update, setUpdate] = useState<Update | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
 
@@ -375,6 +381,17 @@ export default function App() {
     [],
   );
 
+  const commitImageFolders = useCallback((next: ImageFolder[]) => {
+    imageFoldersRef.current = next;
+    setImageFolders(next);
+  }, []);
+
+  const refreshImageFolders = useCallback(async () => {
+    const folders = await api.imageFoldersList();
+    commitImageFolders(folders);
+    return folders;
+  }, [commitImageFolders]);
+
   // Galerie beim Start laden (Bilder liegen persistent im App-Datenordner).
   useEffect(() => {
     api
@@ -388,10 +405,44 @@ export default function App() {
         setImages(map);
       })
       .catch((e) => void api.logLine(`images list failed: ${String(e)}`));
+    refreshImageFolders().catch((e) =>
+      void api.logLine(`image folders list failed: ${String(e)}`),
+    );
+  }, [refreshImageFolders]);
+
+  const resolveImageFolder = useCallback(
+    async (
+      ref: unknown,
+      opts: { create?: boolean } = {},
+    ): Promise<ImageFolder | null> => {
+      const raw = String(ref ?? "").trim();
+      if (!raw || ["alle", "all", "galerie", "bibliothek"].includes(raw.toLowerCase())) {
+        return null;
+      }
+      let folders = imageFoldersRef.current;
+      let found = folders.find(
+        (f) => f.id === raw || f.name.toLowerCase() === raw.toLowerCase(),
+      );
+      if (found) return found;
+      folders = await refreshImageFolders().catch(() => folders);
+      found = folders.find(
+        (f) => f.id === raw || f.name.toLowerCase() === raw.toLowerCase(),
+      );
+      if (found || !opts.create) return found ?? null;
+      const created = await api.imageFolderCreate(raw);
+      await refreshImageFolders().catch(() => {});
+      return created;
+    },
+    [refreshImageFolders],
+  );
+
+  const folderName = useCallback((id?: string | null): string | null => {
+    if (!id) return null;
+    return imageFoldersRef.current.find((f) => f.id === id)?.name ?? null;
   }, []);
 
   /**
-   * Löst „img-…“, eine Galerie-Nummer („6“), einen Dateipfad oder eine URL
+   * Löst „img-…“, eine Galerie-Nummer („1“ = neuestes Bild), einen Dateipfad oder eine URL
    * zu Metadaten auf. Pfade/URLs werden automatisch in die Galerie importiert
    * (inkl. Kompression auf max. 2048 px).
    */
@@ -403,7 +454,12 @@ export default function App() {
         trimmed.startsWith("/") ||
         trimmed.startsWith("~")
       ) {
-        const meta = await api.imageImport(trimmed);
+        const meta = await api.imageImport(
+          trimmed,
+          undefined,
+          undefined,
+          activeImageFolderIdRef.current,
+        );
         setImage(meta.id, {
           status: "done",
           url: convertFileSrc(meta.path),
@@ -418,6 +474,23 @@ export default function App() {
       return list.find((m) => m.id === trimmed) ?? null;
     },
     [setImage],
+  );
+
+  const resolveImageRefs = useCallback(
+    async (refs: unknown): Promise<ImageMeta[]> => {
+      const values = Array.isArray(refs)
+        ? refs.map((v) => String(v))
+        : String(refs ?? "")
+            .split(/\s*(?:,|;|\bund\b|\+)\s*/i)
+            .filter(Boolean);
+      const resolved: ImageMeta[] = [];
+      for (const value of values) {
+        const meta = await resolveImageRef(value);
+        if (meta) resolved.push(meta);
+      }
+      return resolved;
+    },
+    [resolveImageRef],
   );
 
   // (Die cli-line/cli-done-Listener leben weiter unten — sie brauchen die
@@ -473,7 +546,7 @@ export default function App() {
     [commitArtifacts, openArtifacts],
   );
 
-  // ---- Gläserne Jobs: jeder Hintergrund-Job ist ein lebendes Artefakt ----
+  // ---- Gläserne Jobs: jeder Terminal-Lauf ist ein lebendes Artefakt ----
 
   /** Legt das Live-Terminal-Artefakt für einen frisch gestarteten Job an. */
   const addJobArtifact = useCallback(
@@ -586,7 +659,7 @@ export default function App() {
     [appendJobLine, patchJobArtifact, pushActivity, requestResponse],
   );
 
-  // Live-Output laufender Hintergrund-Jobs: Zeile in die Insel-Caption
+  // Live-Output laufender Jobs: Zeile in die Insel-Caption
   // UND ins Live-Terminal des Job-Artefakts.
   useEffect(() => {
     const un = listen<{ job_id: string; agent: string; line: string }>(
@@ -601,25 +674,15 @@ export default function App() {
     };
   }, [appendJobLine, pushActivity]);
 
-  // Fertige Jobs: Ergebnis in die Realtime-Session injizieren, damit Otto
-  // von selbst berichtet. Ohne laufende Session wird es für die nächste
-  // Verbindung vorgemerkt. Das Job-Artefakt morpht in seinen Endzustand.
-  useEffect(() => {
-    const un = listen<{
-      job_id: string;
-      agent: string;
-      task: string;
-      exit_code: number | null;
-      output: string;
-      stderr: string;
-      cancelled: boolean;
-    }>("cli-done", async (e) => {
-      const p = e.payload;
+  const finishCliJob = useCallback(
+    async (p: CliDonePayload) => {
       const job = jobsRef.current.find((j) => j.id === p.job_id);
       commitJobs(jobsRef.current.filter((j) => j.id !== p.job_id));
+      const firstFinish = !finalizedJobsRef.current.has(p.job_id);
+      if (firstFinish) finalizedJobsRef.current.add(p.job_id);
       if (p.cancelled) {
         patchJobArtifact(p.job_id, { jobStatus: "cancelled", exitCode: p.exit_code });
-        pushActivity(`${p.agent}-Job abgebrochen (${p.job_id})`);
+        if (firstFinish) pushActivity(`${p.agent}-Job abgebrochen (${p.job_id})`);
         return;
       }
       const failed = p.exit_code !== 0;
@@ -627,6 +690,7 @@ export default function App() {
         jobStatus: failed ? "error" : "done",
         exitCode: p.exit_code,
       });
+      if (!firstFinish) return;
       pushActivity(
         failed
           ? `${p.agent}-Job fehlgeschlagen (${p.job_id})`
@@ -649,6 +713,7 @@ export default function App() {
               path,
               undefined,
               job?.startedAt ? job.startedAt - 30_000 : undefined,
+              activeImageFolderIdRef.current,
             );
             setImage(meta.id, {
               status: "done",
@@ -678,8 +743,9 @@ export default function App() {
           });
         }
       }
+      if (p.report_on_done === false) return;
       const message =
-        `[Hintergrund-Job ${p.job_id} (${p.agent}) ist fertig — Exit-Code ${p.exit_code ?? "?"}.` +
+        `[Job ${p.job_id} (${p.agent}) ist fertig — Exit-Code ${p.exit_code ?? "?"}.` +
         ` Aufgabe war: ${p.task.slice(0, 300)}]\n` +
         `Ausgabe:\n${p.output.trim() || "(leer)"}` +
         (failed && p.stderr.trim() ? `\nFehlerausgabe:\n${p.stderr.trim()}` : "") +
@@ -691,11 +757,69 @@ export default function App() {
       } else {
         pendingJobResults.current.push(message);
       }
+    },
+    [addArtifact, commitJobs, patchJobArtifact, pushActivity, requestResponse, setImage],
+  );
+
+  const syncFinishedCliJob = useCallback(
+    async (jobId: string) => {
+      const result = await api.cliJobResult(jobId).catch(() => null);
+      if (result) await finishCliJob(result);
+    },
+    [finishCliJob],
+  );
+
+  const waitForCliJob = useCallback(
+    async (jobId: string, timeoutS?: number): Promise<CliDonePayload> => {
+      const timeoutMs = Math.max(1, Math.min(300, timeoutS ?? 30)) * 1000;
+      const deadline = Date.now() + timeoutMs;
+      while (true) {
+        const result = await api.cliJobResult(jobId).catch(() => null);
+        if (result) return result;
+        if (Date.now() >= deadline) {
+          await api.cliJobCancel(jobId).catch(() => []);
+          throw new Error(`Timeout nach ${Math.round(timeoutMs / 1000)} s — Befehl abgebrochen.`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    },
+    [],
+  );
+
+  const runVisibleTerminal = useCallback(
+    async (command: string, timeoutS?: number) => {
+      const startedAt = Date.now();
+      const jobId = await api.cliJobStart("shell", command, undefined, false);
+      commitJobs([
+        ...jobsRef.current,
+        { id: jobId, agent: "shell", task: command, startedAt, reportOnDone: false },
+      ]);
+      addJobArtifact(jobId, "shell", command);
+      const done = await waitForCliJob(jobId, timeoutS);
+      await finishCliJob(done);
+      if (done.cancelled) throw new Error("Befehl abgebrochen.");
+      return {
+        job_id: jobId,
+        exit_code: done.exit_code,
+        stdout: done.output,
+        stderr: done.stderr,
+        cancelled: done.cancelled,
+      };
+    },
+    [addJobArtifact, commitJobs, finishCliJob, waitForCliJob],
+  );
+
+  // Fertige Jobs: Ergebnis in die Realtime-Session injizieren, damit Otto
+  // von selbst berichtet. Ohne laufende Session wird es für die nächste
+  // Verbindung vorgemerkt. Das Job-Artefakt morpht in seinen Endzustand.
+  useEffect(() => {
+    const un = listen<CliDonePayload>("cli-done", (e) => {
+      void finishCliJob(e.payload);
     });
     return () => {
       un.then((f) => f());
     };
-  }, [addArtifact, commitJobs, patchJobArtifact, pushActivity, requestResponse, setImage]);
+  }, [finishCliJob]);
 
   const closeArtifact = useCallback(
     (id: string): boolean => {
@@ -760,6 +884,73 @@ export default function App() {
       }
     },
     [pushActivity, removeImageEverywhere, setImage],
+  );
+
+  const handleOpenImage = useCallback(
+    (id: string) => {
+      const st = imagesRef.current[id];
+      const meta = st?.meta;
+      if (!meta) return;
+      const artifactId = addArtifact({
+        title: meta.name,
+        kind: "image",
+        content: meta.prompt,
+        imageIds: [meta.id],
+      });
+      presentArtifact("gross", artifactId);
+      pushActivity(`öffnet Bild „${meta.name}“`);
+    },
+    [addArtifact, presentArtifact, pushActivity],
+  );
+
+  const handleGalleryFolder = useCallback(
+    async (folderId: string | null) => {
+      activeImageFolderIdRef.current = folderId;
+      try {
+        const [list, folders] = await Promise.all([
+          api.imagesList(),
+          refreshImageFolders().catch(() => imageFoldersRef.current),
+        ]);
+        for (const m of list) {
+          if (!imagesRef.current[m.id]) {
+            setImage(m.id, {
+              status: "done",
+              url: convertFileSrc(m.path),
+              meta: m,
+            });
+          }
+        }
+        const folder = folderId ? folders.find((f) => f.id === folderId) : null;
+        const ids = folderId
+          ? list.filter((m) => m.folder_id === folderId).map((m) => m.id)
+          : list.map((m) => m.id);
+        const title = folder ? `Galerie · ${folder.name}` : "Galerie";
+        const content = folder
+          ? `Ordner: ${folder.name} (${folder.id})`
+          : "Alle gespeicherten Bilder";
+        const existing = artifactsRef.current.find(
+          (a) => a.kind === "image" && a.title.startsWith("Galerie"),
+        );
+        if (existing) {
+          commitArtifacts(
+            artifactsRef.current.map((a) =>
+              a.id === existing.id
+                ? { ...a, title, content, imageIds: ids, updatedAt: Date.now() }
+                : a,
+            ),
+            existing.id,
+          );
+        }
+        pushActivity(
+          folder
+            ? `wechselt zu Bildordner „${folder.name}“`
+            : "zeigt alle Bilder",
+        );
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [commitArtifacts, pushActivity, refreshImageFolders, setImage],
   );
 
   // ----------------------------------------------------------------
@@ -971,23 +1162,30 @@ export default function App() {
             pushActivity(`Terminal: ${command.slice(0, 60)}${command.length > 60 ? "…" : ""}`);
             try {
               if (args.background) {
-                // Non-blocking: als Hintergrund-Job über die Job-
-                // Infrastruktur — Otto bleibt sofort ansprechbar.
+                // Non-blocking: gleiche Job-Infrastruktur, aber der Tool-Call
+                // kehrt sofort zurück — Otto bleibt ansprechbar.
                 const jobId = await api.cliJobStart("shell", command);
                 commitJobs([
                   ...jobsRef.current,
-                  { id: jobId, agent: "shell", task: command, startedAt: Date.now() },
+                  {
+                    id: jobId,
+                    agent: "shell",
+                    task: command,
+                    startedAt: Date.now(),
+                    reportOnDone: true,
+                  },
                 ]);
                 addJobArtifact(jobId, "shell", command);
+                void syncFinishedCliJob(jobId);
                 out = {
                   ok: true,
                   job_id: jobId,
                   status: "gestartet",
                   hinweis:
-                    "Befehl läuft im Hintergrund — das Ergebnis kommt automatisch als Systemnachricht. Der Nutzer sieht ein Live-Terminal als Drop. Zwischenstand: read_job_output; groß zeigen: show_job; abbrechen: cancel_job.",
+                    "Befehl läuft als sichtbarer Job weiter — das Ergebnis kommt automatisch als Systemnachricht. Der Nutzer sieht ein Live-Terminal als Drop. Zwischenstand: read_job_output; groß zeigen: show_job; abbrechen: cancel_job.",
                 };
               } else {
-                const res = await api.runTerminal(
+                const res = await runVisibleTerminal(
                   command,
                   typeof args.timeout_s === "number" ? args.timeout_s : undefined,
                 );
@@ -1024,9 +1222,10 @@ export default function App() {
               );
               commitJobs([
                 ...jobsRef.current,
-                { id: jobId, agent, task, startedAt: Date.now() },
+                { id: jobId, agent, task, startedAt: Date.now(), reportOnDone: true },
               ]);
               addJobArtifact(jobId, agent, task);
+              void syncFinishedCliJob(jobId);
               pushActivity(
                 `delegiert an ${agent}: ${task.slice(0, 56)}${task.length > 56 ? "…" : ""}`,
               );
@@ -1036,8 +1235,37 @@ export default function App() {
                 agent,
                 status: "gestartet",
                 hinweis:
-                  "Läuft im Hintergrund — du bleibst ansprechbar. Das Ergebnis kommt automatisch als Systemnachricht; sag dem Nutzer nur kurz Bescheid. Der Nutzer sieht ein Live-Terminal als Drop. Zwischenstand: read_job_output; groß zeigen: show_job.",
+                  "Läuft als sichtbarer Job weiter — du bleibst ansprechbar. Das Ergebnis kommt automatisch als Systemnachricht; sag dem Nutzer nur kurz Bescheid. Der Nutzer sieht ein Live-Terminal als Drop. Zwischenstand: read_job_output; groß zeigen: show_job.",
               };
+            } catch (e) {
+              out = { ok: false, error: String(e) };
+            }
+            break;
+          }
+          case "computer_use": {
+            const s = settingsRefValue.current;
+            if (!s?.codex_computer_use_enabled) {
+              out = {
+                ok: false,
+                error: "Codex Computer Use ist in den Einstellungen deaktiviert.",
+              };
+              break;
+            }
+            const action = String(args.action ?? "").trim();
+            if (!action) {
+              out = { ok: false, error: "Keine Computer-Use-Aktion angegeben." };
+              break;
+            }
+            const app = args.app ? String(args.app) : "";
+            pushActivity(
+              app
+                ? `steuert ${app}: ${action}`
+                : action === "list_apps"
+                  ? "prüft steuerbare Apps"
+                  : `Computer Use: ${action}`,
+            );
+            try {
+              out = await api.codexComputerUseCall(args);
             } catch (e) {
               out = { ok: false, error: String(e) };
             }
@@ -1212,7 +1440,7 @@ export default function App() {
                 ok: false,
                 error: id
                   ? `Kein Job-Artefakt zu ${id} gefunden.`
-                  : "Kein Hintergrund-Job vorhanden.",
+                  : "Kein sichtbarer Job vorhanden.",
                 jobs: jobArts.map((a) => ({ job_id: a.jobId, status: a.jobStatus })),
               };
               break;
@@ -1240,7 +1468,7 @@ export default function App() {
                 ok: false,
                 error: id
                   ? `Kein Job-Artefakt zu ${id} gefunden.`
-                  : "Kein Hintergrund-Job vorhanden.",
+                  : "Kein sichtbarer Job vorhanden.",
               };
               break;
             }
@@ -1274,6 +1502,8 @@ export default function App() {
             ) as Quality;
             const baseName =
               String(args.name ?? "").trim() || prompt.slice(0, 32) || "Bild";
+            const folder = await resolveImageFolder(args.folder, { create: true });
+            const folderId = folder?.id ?? activeImageFolderIdRef.current;
             if (provider === "codex") {
               if (!s?.codex_imagegen_enabled) {
                 out = {
@@ -1311,9 +1541,10 @@ export default function App() {
                 const jobId = await api.codexImageJobStart(task);
                 commitJobs([
                   ...jobsRef.current,
-                  { id: jobId, agent: "codex-image", task, startedAt },
+                  { id: jobId, agent: "codex-image", task, startedAt, reportOnDone: true },
                 ]);
                 addJobArtifact(jobId, "codex-image", task);
+                void syncFinishedCliJob(jobId);
                 pushActivity(
                   `Codex erzeugt ${n > 1 ? `${n} Bilder` : "ein Bild"}: „${prompt.slice(0, 48)}“`,
                 );
@@ -1323,7 +1554,7 @@ export default function App() {
                   job_id: jobId,
                   status: "gestartet",
                   hinweis:
-                    "Codex-Bildgenerierung läuft als sichtbarer Hintergrund-Job. Die finalen Dateien werden nach Abschluss automatisch in die Galerie importiert und als Bild-Drop gezeigt.",
+                    "Codex-Bildgenerierung läuft als sichtbarer Job. Die finalen Dateien werden nach Abschluss automatisch in die Galerie importiert und als Bild-Drop gezeigt.",
                 };
               } catch (e) {
                 out = { ok: false, error: String(e) };
@@ -1379,6 +1610,9 @@ export default function App() {
                 b64,
                 transparent,
                 size,
+                folderId,
+                [],
+                "generate",
               );
               // Nach dem Speichern die leichte asset://-URL statt der
               // Daten-URL verwenden — hält die Panel-Synchronisierung schlank.
@@ -1458,14 +1692,15 @@ export default function App() {
               String(args.model ?? "").trim().toLowerCase() === "codex"
                 ? "codex"
                 : "api";
-            const base = await resolveImageRef(String(args.image ?? ""));
-            if (!base) {
+            const bases = await resolveImageRefs(args.images ?? args.image);
+            if (bases.length === 0) {
               out = {
                 ok: false,
-                error: `Bild „${args.image}“ nicht gefunden. Nutze list_images.`,
+                error: `Bild „${args.image ?? args.images}“ nicht gefunden. Nutze list_images.`,
               };
               break;
             }
+            const base = bases[0];
             const prompt = String(args.prompt ?? "");
             const n = Math.max(1, Math.min(8, Number(args.n) || 1));
             const quality = (
@@ -1484,6 +1719,9 @@ export default function App() {
             }
             const baseName =
               String(args.name ?? "").trim() || `${base.name} (bearbeitet)`;
+            const folder = await resolveImageFolder(args.folder, { create: true });
+            const folderId =
+              folder?.id ?? base.folder_id ?? activeImageFolderIdRef.current;
             if (provider === "codex") {
               if (!s?.codex_imagegen_enabled) {
                 out = {
@@ -1519,21 +1757,29 @@ export default function App() {
                   quality,
                 });
                 const startedAt = Date.now();
-                const jobId = await api.codexImageJobStart(task, [base.path]);
+                const jobId = await api.codexImageJobStart(
+                  task,
+                  bases.map((b) => b.path),
+                );
                 commitJobs([
                   ...jobsRef.current,
-                  { id: jobId, agent: "codex-image", task, startedAt },
+                  { id: jobId, agent: "codex-image", task, startedAt, reportOnDone: true },
                 ]);
                 addJobArtifact(jobId, "codex-image", task);
-                pushActivity(`Codex bearbeitet „${base.name}“: ${prompt.slice(0, 48)}`);
+                void syncFinishedCliJob(jobId);
+                pushActivity(
+                  bases.length > 1
+                    ? `Codex kombiniert ${bases.length} Bilder: ${prompt.slice(0, 48)}`
+                    : `Codex bearbeitet „${base.name}“: ${prompt.slice(0, 48)}`,
+                );
                 out = {
                   ok: true,
                   provider: "codex",
-                  basis: base.id,
+                  basis: bases.map((b) => b.id),
                   job_id: jobId,
                   status: "gestartet",
                   hinweis:
-                    "Codex-Bildbearbeitung läuft als sichtbarer Hintergrund-Job. Die finalen Dateien werden nach Abschluss automatisch in die Galerie importiert und als Bild-Drop gezeigt.",
+                    "Codex-Bildbearbeitung läuft als sichtbarer Job. Die finalen Dateien werden nach Abschluss automatisch in die Galerie importiert und als Bild-Drop gezeigt.",
                 };
               } catch (e) {
                 out = { ok: false, error: String(e) };
@@ -1557,7 +1803,11 @@ export default function App() {
               };
               break;
             }
-            pushActivity(`bearbeitet „${base.name}“: ${prompt.slice(0, 48)}`);
+            pushActivity(
+              bases.length > 1
+                ? `kombiniert ${bases.length} Bilder: ${prompt.slice(0, 48)}`
+                : `bearbeitet „${base.name}“: ${prompt.slice(0, 48)}`,
+            );
 
             const ids = Array.from({ length: n }, () => newImageId());
             ids.forEach((id) =>
@@ -1571,9 +1821,11 @@ export default function App() {
             });
 
             try {
-              const baseB64 = await api.imageReadB64(base.id);
+              const baseB64s = await Promise.all(
+                bases.map((b) => api.imageReadB64(b.id)),
+              );
               const editedB64s = useOpenAi
-                ? await editImages(key, [baseB64], {
+                ? await editImages(key, baseB64s, {
                     prompt,
                     n,
                     quality,
@@ -1588,7 +1840,7 @@ export default function App() {
                     resolution: (["1K", "2K", "4K"].includes(args.resolution)
                       ? args.resolution
                       : "1K") as Resolution,
-                    inputRefsB64: [baseB64],
+                    inputRefsB64: baseB64s,
                   });
               const stored = await Promise.all(
                 ids.map(async (id, i) => {
@@ -1604,6 +1856,9 @@ export default function App() {
                     b64,
                     base.transparent,
                     size ?? base.size,
+                    folderId,
+                    bases.map((b) => b.id),
+                    bases.length > 1 ? "merge" : "edit",
                   );
                   setImage(id, {
                     status: "done",
@@ -1616,7 +1871,7 @@ export default function App() {
               const list = await api.imagesList();
               out = {
                 ok: true,
-                basis: base.id,
+                basis: bases.map((b) => b.id),
                 images: stored.map((r) => ({
                   ...r,
                   nummer: list.findIndex((m) => m.id === r.id) + 1 || undefined,
@@ -1664,9 +1919,12 @@ export default function App() {
             }
             pushActivity(`importiert Bild: ${source.slice(0, 60)}`);
             try {
+              const folder = await resolveImageFolder(args.folder, { create: true });
               const meta = await api.imageImport(
                 source,
                 args.name ? String(args.name) : undefined,
+                undefined,
+                folder?.id ?? activeImageFolderIdRef.current,
               );
               setImage(meta.id, {
                 status: "done",
@@ -1692,7 +1950,15 @@ export default function App() {
             break;
           }
           case "show_gallery": {
+            const folder = await resolveImageFolder(args.folder, {
+              create: Boolean(args.folder),
+            });
+            const folderId = folder?.id ?? null;
+            activeImageFolderIdRef.current = folderId;
             const list = await api.imagesList();
+            const visible = folderId
+              ? list.filter((m) => m.folder_id === folderId)
+              : list;
             if (list.length === 0) {
               out = { ok: false, error: "Die Bildbibliothek ist leer." };
               break;
@@ -1706,15 +1972,19 @@ export default function App() {
                 });
               }
             }
-            const ids = list.map((m) => m.id);
+            const ids = visible.map((m) => m.id);
             const existing = artifactsRef.current.find(
-              (a) => a.kind === "image" && a.title === "Galerie",
+              (a) => a.kind === "image" && a.title.startsWith("Galerie"),
             );
+            const title = folder ? `Galerie · ${folder.name}` : "Galerie";
+            const content = folder
+              ? `Ordner: ${folder.name} (${folder.id})`
+              : "Alle gespeicherten Bilder";
             let galleryId: string;
             if (existing) {
               const next = artifactsRef.current.map((a) =>
                 a.id === existing.id
-                  ? { ...a, imageIds: ids, updatedAt: Date.now() }
+                  ? { ...a, title, content, imageIds: ids, updatedAt: Date.now() }
                   : a,
               );
               commitArtifacts(next, existing.id);
@@ -1722,16 +1992,26 @@ export default function App() {
               galleryId = existing.id;
             } else {
               galleryId = addArtifact({
-                title: "Galerie",
+                title,
                 kind: "image",
-                content: "Alle gespeicherten Bilder",
+                content,
                 imageIds: ids,
               });
             }
             // Die Galerie will man durchsehen — direkt groß öffnen.
             presentArtifact("gross", galleryId);
-            pushActivity(`zeigt die Bildbibliothek (${list.length} Bilder)`);
-            out = { ok: true, anzahl: list.length };
+            pushActivity(
+              folder
+                ? `zeigt Ordner „${folder.name}“ (${visible.length} Bilder)`
+                : `zeigt die Bildbibliothek (${list.length} Bilder)`,
+            );
+            out = {
+              ok: true,
+              anzahl: visible.length,
+              ordner: folder?.name ?? null,
+              hinweis:
+                "Die Galerie ist als Bildstudio geöffnet. Nummern beziehen sich auf die sichtbare Ansicht; Nr. 1 ist das neueste sichtbare Bild.",
+            };
             break;
           }
           case "list_images": {
@@ -1745,11 +2025,92 @@ export default function App() {
                 prompt: m.prompt.slice(0, 80),
                 favorit: m.favorite,
                 groesse: m.size,
+                ordner: folderName(m.folder_id),
+                eltern: m.parent_ids ?? [],
+                quelle: m.source_url ?? null,
                 markdown: `![${m.name}](otto-image:${m.id})`,
               })),
               note:
                 "Galerie-Bilder können in Markdown-Artefakten direkt mit ![Name](otto-image:<id>) eingebettet werden.",
             };
+            break;
+          }
+          case "list_image_folders": {
+            const folders = await refreshImageFolders();
+            const list = await api.imagesList();
+            out = {
+              ok: true,
+              active_folder: activeImageFolderIdRef.current,
+              folders: folders.map((f) => ({
+                id: f.id,
+                name: f.name,
+                anzahl: list.filter((m) => m.folder_id === f.id).length,
+              })),
+              note:
+                "Ordner sind optional. show_gallery kann mit folder geöffnet werden; neue Bilder landen im aktiven Ordner.",
+            };
+            break;
+          }
+          case "manage_image_folder": {
+            const action = String(args.action ?? "").trim();
+            if (action === "create") {
+              const name = String(args.folder ?? args.name ?? "").trim();
+              if (!name) {
+                out = { ok: false, error: "Ordnername fehlt." };
+                break;
+              }
+              const folder = await api.imageFolderCreate(name);
+              await refreshImageFolders();
+              activeImageFolderIdRef.current = folder.id;
+              pushActivity(`legt Bildordner „${folder.name}“ an`);
+              out = { ok: true, folder };
+            } else if (action === "move" || action === "remove") {
+              const target =
+                action === "move"
+                  ? await resolveImageFolder(args.folder ?? args.name, { create: true })
+                  : null;
+              if (action === "move" && !target) {
+                out = { ok: false, error: "Zielordner fehlt." };
+                break;
+              }
+              const rawImages = args.images ?? args.image;
+              let metas: ImageMeta[] = [];
+              const raw = String(rawImages ?? "").trim().toLowerCase();
+              if (raw === "all" || raw === "alle") {
+                const list = await api.imagesList();
+                metas = activeImageFolderIdRef.current
+                  ? list.filter((m) => m.folder_id === activeImageFolderIdRef.current)
+                  : list;
+              } else {
+                metas = await resolveImageRefs(rawImages);
+              }
+              if (metas.length === 0) {
+                out = { ok: false, error: "Keine Bilder gefunden." };
+                break;
+              }
+              for (const meta of metas) {
+                await api.imageSetFolder(meta.id, target?.id ?? null);
+                const st = imagesRef.current[meta.id];
+                if (st?.meta) {
+                  setImage(meta.id, {
+                    meta: { ...st.meta, folder_id: target?.id ?? null },
+                  });
+                }
+              }
+              await refreshImageFolders();
+              pushActivity(
+                action === "move"
+                  ? `verschiebt ${metas.length} Bilder nach „${target?.name}“`
+                  : `nimmt ${metas.length} Bilder aus dem Ordner`,
+              );
+              out = {
+                ok: true,
+                anzahl: metas.length,
+                ordner: target?.name ?? null,
+              };
+            } else {
+              out = { ok: false, error: `Unbekannte Ordner-Aktion: ${action}` };
+            }
             break;
           }
           case "manage_image": {
@@ -1947,8 +2308,10 @@ export default function App() {
       removeImageEverywhere,
       requestResponse,
       resolveImageRef,
+      runVisibleTerminal,
       runResearchWatcher,
       setImage,
+      syncFinishedCliJob,
     ],
   );
 
@@ -2103,12 +2466,17 @@ export default function App() {
       let galleryInfo = "";
       try {
         const gallery = await api.imagesList();
+        const folders = await api.imageFoldersList().catch(() => []);
         if (gallery.length > 0) {
           const recent = gallery
-            .slice(-8)
+            .slice(0, 8)
             .map((m) => `Nr. ${gallery.indexOf(m) + 1} „${m.name}“ (${m.id})`)
             .join(", ");
-          galleryInfo = `\n\n--- Bildbibliothek ---\nEs gibt ${gallery.length} gespeicherte Bilder aus früheren Sitzungen (persistent). Neueste: ${recent}. Zugriff über list_images, show_gallery, open_image, edit_image und manage_image.`;
+          const folderInfo =
+            folders.length > 0
+              ? ` Ordner: ${folders.map((f) => `„${f.name}“ (${f.id})`).join(", ")}.`
+              : "";
+          galleryInfo = `\n\n--- Bildbibliothek ---\nEs gibt ${gallery.length} gespeicherte Bilder aus früheren Sitzungen (persistent). Galerie-Nummern sind neueste zuerst: Nr. 1 ist das aktuellste Bild. Neueste: ${recent}.${folderInfo} Zugriff über list_images, show_gallery, open_image, edit_image, list_image_folders, manage_image_folder und manage_image.`;
         }
       } catch {
         // Ohne Galerie-Info verbinden.
@@ -2128,7 +2496,7 @@ export default function App() {
             `Standard-Agent: ${current.cli_default?.trim() || "codex"}.`;
           if (current.codex_imagegen_enabled && avail.codex) {
             cliInfo +=
-              "\nCodex-Bildmodus ist aktiviert, aber NICHT Standard: Nutze generate_image/edit_image mit provider=\"codex\" nur, wenn der Nutzer Codex, das ChatGPT-Abo oder Codex-Bildgenerierung ausdrücklich dafür wünscht. Ergebnisse laufen als Hintergrund-Job und werden danach automatisch in die Galerie importiert.";
+              "\nCodex-Bildmodus ist aktiviert, aber NICHT Standard: Nutze generate_image/edit_image mit provider=\"codex\" nur, wenn der Nutzer Codex, das ChatGPT-Abo oder Codex-Bildgenerierung ausdrücklich dafür wünscht. Ergebnisse laufen als sichtbarer Job und werden danach automatisch in die Galerie importiert.";
           }
           if (current.cli_notes?.trim()) {
             cliInfo += `\nHinweise des Nutzers zur Wahl des Agenten: ${current.cli_notes.trim()}`;
@@ -2137,12 +2505,24 @@ export default function App() {
           // Ohne Delegations-Info verbinden.
         }
       }
+      let computerUseInfo = "";
+      if (current.codex_computer_use_enabled) {
+        try {
+          const status = await api.codexComputerUseStatus();
+          computerUseInfo =
+            `\n\n--- Codex Computer Use ---\nMac-GUI-Steuerung ist ${status.ready ? "bereit" : "aktiviert, aber noch nicht bereit"}: ${status.hint} ` +
+            `Nutze computer_use nur für Aufgaben, die eine sichtbare App-Oberfläche brauchen.`;
+        } catch {
+          computerUseInfo =
+            "\n\n--- Codex Computer Use ---\nMac-GUI-Steuerung ist aktiviert, der lokale Status konnte aber nicht geprüft werden. Nutze computer_use nur, wenn eine sichtbare App-Oberfläche nötig ist.";
+        }
+      }
       // YOLO-Modus: Otto muss wissen, dass die üblichen Terminal-Schranken
       // aufgehoben sind — sonst versucht er destruktive Befehle gar nicht erst.
       const yoloInfo = current.yolo_mode
         ? `\n\n--- YOLO-Modus AKTIV ---\nDer Nutzer hat den vollen Systemzugriff freigeschaltet. run_terminal und delegate_task haben KEINE Befehls-Beschränkungen mehr: destruktive Befehle, Downloads, Datei-Umleitungen, Prozess-Steuerung usw. sind alle erlaubt — du arbeitest mit den vollen Rechten des angemeldeten Nutzers, wie in einem normalen Terminal. Echtes root gibt es nur mit sudo und Passwort (nicht-interaktiv nicht möglich). Nutze die Macht verantwortungsvoll: Führe zerstörerische oder weitreichende Befehle (löschen, überschreiben, Systemänderungen) nur auf klare Anweisung aus und fasse vorher kurz zusammen, was du tun wirst.`
         : "";
-      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${notesInfo}${skillsInfo}${galleryInfo}${cliInfo}${yoloInfo}`;
+      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${notesInfo}${skillsInfo}${galleryInfo}${cliInfo}${computerUseInfo}${yoloInfo}`;
 
       const client = new RealtimeClient({
         onOpen: () => {
@@ -2266,6 +2646,9 @@ export default function App() {
           !current.cli_enabled
         )
           return false;
+        if (t.name === "computer_use" && !current.codex_computer_use_enabled) {
+          return false;
+        }
         // Job-Einsicht braucht mindestens eine Job-Quelle.
         if (
           (t.name === "read_job_output" || t.name === "show_job") &&
@@ -2335,15 +2718,19 @@ export default function App() {
     artifacts,
     activeArtifactId,
     images,
+    imageFolders,
     artifactStyle,
     artifactsRef,
     activeArtifactIdRef,
     imagesRef,
+    imageFoldersRef,
     artifactStyleRef,
     setActiveArtifactId,
     setSettings,
     closeArtifact,
     handleImageAction,
+    handleOpenImage,
+    handleGalleryFolder,
     reloadArtifactStyle,
   });
 

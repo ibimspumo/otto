@@ -15,6 +15,7 @@ export interface Settings {
   reasoning_effort: string;
   image_model: string;
   codex_imagegen_enabled: boolean;
+  codex_computer_use_enabled: boolean;
   terminal_enabled: boolean;
   wake_word_enabled: boolean;
   wake_word_phrase: string;
@@ -48,6 +49,21 @@ export interface Diagnostics {
   accessibility: boolean;
 }
 
+export interface CodexComputerUseStatus {
+  codex_cli: boolean;
+  codex_version: string | null;
+  codex_app: boolean;
+  app_server_running: boolean;
+  bundled_plugin: boolean;
+  installed_plugin: boolean;
+  computer_use_service_running: boolean;
+  mcp_client: string | null;
+  mcp_probe_ok: boolean;
+  mcp_tool_count: number;
+  ready: boolean;
+  hint: string;
+}
+
 /** Skill-Metadaten für die Progressive Disclosure (Name + Beschreibung). */
 export interface SkillInfo {
   name: string;
@@ -69,13 +85,26 @@ export interface UnprocessedSession {
   transcript: string;
 }
 
-/** Laufender Hintergrund-Job (delegate_task an Codex/Claude CLI). */
+/** Laufender sichtbarer Job (Terminal, delegate_task, Codex-Bildjob). */
 export interface CliJob {
   id: string;
   agent: string;
   task: string;
   /** Startzeit (ms) — mtime-Guard für den Bild-Auto-Import nach Job-Ende. */
   startedAt?: number;
+  /** false = Ergebnis wird vom wartenden Tool-Call zurückgegeben, nicht automatisch gemeldet. */
+  reportOnDone?: boolean;
+}
+
+export interface CliDonePayload {
+  job_id: string;
+  agent: string;
+  task: string;
+  exit_code: number | null;
+  output: string;
+  stderr: string;
+  cancelled: boolean;
+  report_on_done?: boolean;
 }
 
 export type ArtifactKind = "markdown" | "code" | "search" | "image" | "job";
@@ -92,6 +121,17 @@ export interface ImageMeta {
   transparent: boolean;
   size: string;
   path: string;
+  folder_id?: string | null;
+  parent_ids?: string[];
+  operation?: string;
+  source_url?: string | null;
+}
+
+export interface ImageFolder {
+  id: string;
+  name: string;
+  created_ms: number;
+  updated_ms: number;
 }
 
 export interface ImageState {
@@ -129,7 +169,7 @@ export interface Artifact {
   results?: SearchResult[];
   imageIds?: string[];
   updatedAt: number;
-  /** Gläserne Jobs: Live-Terminal eines Hintergrund-Jobs als Artefakt. */
+  /** Gläserne Jobs: Live-Terminal eines Jobs als Artefakt. */
   jobId?: string;
   jobAgent?: string;
   jobStatus?: JobStatus;

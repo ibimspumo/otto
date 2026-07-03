@@ -1,5 +1,6 @@
 //! Persistenter Bildspeicher für generierte Bilder: PNG-Dateien plus
-//! index.json (Reihenfolge = Galerie-Nummerierung) im App-Datenverzeichnis.
+//! index.json im App-Datenverzeichnis. Nach außen wird die Galerie immer
+//! neueste zuerst geliefert, damit "Bild 1" dem aktuellen Bild entspricht.
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,19 @@ pub struct ImageMeta {
     pub size: String,
     /// Absoluter Pfad — wird beim Listen berechnet, nicht gespeichert.
     pub path: String,
+    pub folder_id: Option<String>,
+    pub parent_ids: Vec<String>,
+    pub operation: String,
+    pub source_url: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
+pub struct ImageFolder {
+    pub id: String,
+    pub name: String,
+    pub created_ms: u64,
+    pub updated_ms: u64,
 }
 
 impl Default for ImageMeta {
@@ -36,6 +50,21 @@ impl Default for ImageMeta {
             transparent: false,
             size: String::new(),
             path: String::new(),
+            folder_id: None,
+            parent_ids: Vec::new(),
+            operation: String::new(),
+            source_url: None,
+        }
+    }
+}
+
+impl Default for ImageFolder {
+    fn default() -> Self {
+        ImageFolder {
+            id: String::new(),
+            name: String::new(),
+            created_ms: 0,
+            updated_ms: 0,
         }
     }
 }
@@ -73,11 +102,64 @@ fn save_index(dir: &PathBuf, index: &[ImageMeta]) -> Result<(), String> {
     Ok(())
 }
 
+fn load_folders(dir: &PathBuf) -> Vec<ImageFolder> {
+    let path = dir.join("folders.json");
+    if !path.exists() {
+        return Vec::new();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_folders(dir: &PathBuf, folders: &[ImageFolder]) -> Result<(), String> {
+    let raw = serde_json::to_string_pretty(folders).map_err(|e| e.to_string())?;
+    let path = dir.join("folders.json");
+    fs::write(&path, raw).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn with_paths(dir: &PathBuf, mut index: Vec<ImageMeta>) -> Vec<ImageMeta> {
     for m in &mut index {
         m.path = dir.join(&m.file).to_string_lossy().into_owned();
     }
     index
+}
+
+fn validate_folder(dir: &PathBuf, folder_id: &Option<String>) -> Result<(), String> {
+    let Some(id) = folder_id.as_ref().filter(|id| !id.trim().is_empty()) else {
+        return Ok(());
+    };
+    if load_folders(dir).iter().any(|f| f.id == *id) {
+        Ok(())
+    } else {
+        Err(format!("Ordner {id} nicht gefunden."))
+    }
+}
+
+fn touch_folder(dir: &PathBuf, folder_id: &Option<String>) -> Result<(), String> {
+    let Some(id) = folder_id.as_ref().filter(|id| !id.trim().is_empty()) else {
+        return Ok(());
+    };
+    let mut folders = load_folders(dir);
+    if let Some(folder) = folders.iter_mut().find(|f| f.id == *id) {
+        folder.updated_ms = now_ms();
+        save_folders(dir, &folders)?;
+    }
+    Ok(())
 }
 
 fn image_ext(bytes: &[u8]) -> Result<&'static str, String> {
@@ -159,7 +241,83 @@ fn validate_import_url(src: &str) -> Result<reqwest::Url, String> {
 #[tauri::command]
 pub fn images_list(app: tauri::AppHandle) -> Result<Vec<ImageMeta>, String> {
     let dir = images_dir(&app)?;
-    Ok(with_paths(&dir, load_index(&dir)))
+    let mut index = with_paths(&dir, load_index(&dir));
+    index.sort_by(|a, b| {
+        b.created_ms
+            .cmp(&a.created_ms)
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    Ok(index)
+}
+
+#[tauri::command]
+pub fn image_folders_list(app: tauri::AppHandle) -> Result<Vec<ImageFolder>, String> {
+    let dir = images_dir(&app)?;
+    let mut folders = load_folders(&dir);
+    folders.sort_by(|a, b| {
+        b.updated_ms
+            .cmp(&a.updated_ms)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(folders)
+}
+
+#[tauri::command]
+pub fn image_folder_create(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<ImageFolder, String> {
+    let dir = images_dir(&app)?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Ordnername fehlt.".into());
+    }
+    let mut folders = load_folders(&dir);
+    if let Some(existing) = folders
+        .iter()
+        .find(|f| f.name.eq_ignore_ascii_case(trimmed))
+        .cloned()
+    {
+        return Ok(existing);
+    }
+    let ts = now_ms();
+    let id = format!("fld-{ts}-{}", sanitize_filename(trimmed));
+    let folder = ImageFolder {
+        id,
+        name: trimmed.to_string(),
+        created_ms: ts,
+        updated_ms: ts,
+    };
+    folders.push(folder.clone());
+    save_folders(&dir, &folders)?;
+    Ok(folder)
+}
+
+#[tauri::command]
+pub fn image_set_folder(
+    app: tauri::AppHandle,
+    id: String,
+    folder_id: Option<String>,
+) -> Result<(), String> {
+    let dir = images_dir(&app)?;
+    let folder_id = folder_id.and_then(|v| {
+        let trimmed = v.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+    validate_folder(&dir, &folder_id)?;
+    let mut index = load_index(&dir);
+    let meta = index
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or(format!("Bild {id} nicht gefunden."))?;
+    meta.folder_id = folder_id.clone();
+    save_index(&dir, &index)?;
+    touch_folder(&dir, &folder_id)?;
+    Ok(())
 }
 
 fn store_bytes(
@@ -170,8 +328,13 @@ fn store_bytes(
     bytes: &[u8],
     transparent: bool,
     size: &str,
+    folder_id: Option<String>,
+    parent_ids: Vec<String>,
+    operation: &str,
+    source_url: Option<String>,
 ) -> Result<ImageMeta, String> {
     let dir = images_dir(app)?;
+    validate_folder(&dir, &folder_id)?;
     let ext = image_ext(bytes)?;
     let file = format!("{id}.{ext}");
     let image_path = dir.join(&file);
@@ -182,10 +345,7 @@ fn store_bytes(
         let _ = fs::set_permissions(&image_path, fs::Permissions::from_mode(0o600));
     }
 
-    let created_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let created_ms = now_ms();
     let meta = ImageMeta {
         id: id.to_string(),
         file: file.clone(),
@@ -196,11 +356,16 @@ fn store_bytes(
         transparent,
         size: size.to_string(),
         path: dir.join(&file).to_string_lossy().into_owned(),
+        folder_id: folder_id.clone(),
+        parent_ids,
+        operation: operation.to_string(),
+        source_url,
     };
     let mut index = load_index(&dir);
     index.retain(|m| m.id != id);
     index.push(meta.clone());
     save_index(&dir, &index)?;
+    touch_folder(&dir, &folder_id)?;
     Ok(meta)
 }
 
@@ -213,11 +378,27 @@ pub fn image_store(
     b64: String,
     transparent: bool,
     size: String,
+    folder_id: Option<String>,
+    parent_ids: Option<Vec<String>>,
+    operation: Option<String>,
+    source_url: Option<String>,
 ) -> Result<ImageMeta, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64.as_bytes())
         .map_err(|e| format!("Ungültige Bilddaten: {e}"))?;
-    store_bytes(&app, &id, &name, &prompt, &bytes, transparent, &size)
+    store_bytes(
+        &app,
+        &id,
+        &name,
+        &prompt,
+        &bytes,
+        transparent,
+        &size,
+        folder_id,
+        parent_ids.unwrap_or_default(),
+        operation.as_deref().unwrap_or("generate"),
+        source_url,
+    )
 }
 
 /// Importiert ein Bild in die Galerie — von einem lokalen Pfad (auch ~/…)
@@ -232,6 +413,7 @@ pub async fn image_import(
     source: String,
     name: Option<String>,
     newer_than_ms: Option<u64>,
+    folder_id: Option<String>,
 ) -> Result<ImageMeta, String> {
     let src = source.trim().to_string();
 
@@ -365,6 +547,14 @@ pub async fn image_import(
         &data,
         false,
         &size,
+        folder_id,
+        Vec::new(),
+        "import",
+        if src.starts_with("https://") {
+            Some(src)
+        } else {
+            None
+        },
     )
 }
 

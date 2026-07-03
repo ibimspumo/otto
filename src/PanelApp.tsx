@@ -11,25 +11,28 @@ import {
   DROP_W,
   layoutDrops,
   layoutEdgeTab,
+  layoutImageStudio,
   layoutQuickLook,
   type PresentationPlacement,
 } from "./lib/hudWindow";
 import * as api from "./lib/tauriApi";
-import type { Artifact, ImageState } from "./lib/types";
+import type { Artifact, ImageFolder, ImageState } from "./lib/types";
 
 /** Zustand, den das Hauptfenster (der Orchestrator) hierher spiegelt. */
 interface PanelState {
   artifacts: Artifact[];
   activeId: string | null;
   images: Record<string, ImageState>;
+  imageFolders: ImageFolder[];
 }
 
 /**
  * stack     — der sichtbare Drop-Stapel unten links
  * tucked    — zurückgezogen: nur ein schmaler Leucht-Tab an der Kante
  * quicklook — Großansicht eines Artefakts
+ * studio    — mittlere Bildstudio-Ansicht der Galerie
  */
-type Mode = "stack" | "tucked" | "quicklook";
+type Mode = "stack" | "tucked" | "quicklook" | "studio";
 
 /** Ruhezeit, nach der sich der Stapel von selbst zurückzieht. */
 const TUCK_AFTER_MS = 10_000;
@@ -123,6 +126,85 @@ function desiredQuickLook(
 function preferredPlacement(a: Artifact): PresentationPlacement {
   if (a.kind === "search") return "rightShelf";
   return "center";
+}
+
+function isGalleryArtifact(a: Artifact | null): boolean {
+  return Boolean(a && a.kind === "image" && a.title.startsWith("Galerie"));
+}
+
+function folderIdFromGallery(a: Artifact | null): string | null {
+  if (!a?.content) return null;
+  const match = a.content.match(/\((fld-[^)]+)\)/);
+  return match?.[1] ?? null;
+}
+
+const STUDIO_TARGET_ROW_H = 166;
+const STUDIO_MIN_LAST_ROW_H = 132;
+
+interface StudioTileLayout {
+  id: string;
+  w: number;
+  h: number;
+}
+
+function imageAspect(id: string, images: Record<string, ImageState>): number {
+  const st = images[id];
+  const dims = parseSize(st?.meta?.size ?? st?.size);
+  if (!dims) return 1;
+  return Math.min(4, Math.max(0.25, dims.w / dims.h));
+}
+
+function buildStudioRows(
+  ids: string[],
+  images: Record<string, ImageState>,
+  width: number,
+): StudioTileLayout[][] {
+  const available = Math.max(320, width);
+  const rows: StudioTileLayout[][] = [];
+  let current: string[] = [];
+  let aspectSum = 0;
+
+  const finish = (items: string[], height: number, fillWidth: boolean) => {
+    const row = items.map((id) => ({
+        id,
+        h: Math.round(height),
+        w: Math.round(height * imageAspect(id, images)),
+      }));
+    if (fillWidth && row.length > 0) {
+      const gaps = (row.length - 1) * GAP;
+      const used = row.reduce((sum, item) => sum + item.w, 0) + gaps;
+      row[row.length - 1].w += Math.round(available - used);
+    }
+    rows.push(row);
+  };
+
+  for (const id of ids) {
+    current.push(id);
+    aspectSum += imageAspect(id, images);
+    const gaps = (current.length - 1) * GAP;
+    const rowH = (available - gaps) / aspectSum;
+    if (rowH <= STUDIO_TARGET_ROW_H || current.length >= 6) {
+      finish(current, rowH, true);
+      current = [];
+      aspectSum = 0;
+    }
+  }
+
+  if (current.length > 0) {
+    const gaps = (current.length - 1) * GAP;
+    const naturalH = (available - gaps) / aspectSum;
+    const lastRowH =
+      naturalH >= STUDIO_MIN_LAST_ROW_H
+        ? Math.min(STUDIO_TARGET_ROW_H, naturalH)
+        : naturalH;
+    finish(
+      current,
+      lastRowH,
+      false,
+    );
+  }
+
+  return rows;
 }
 
 // ------------------------------------------------------------------
@@ -231,10 +313,14 @@ export default function PanelApp() {
     artifacts: [],
     activeId: null,
     images: {},
+    imageFolders: [],
   });
   const [mode, setMode] = useState<Mode>("stack");
   const [qlId, setQlId] = useState<string | null>(null);
   const [qlSize, setQlSize] = useState<QuickLookSize>("normal");
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const studioGridRef = useRef<HTMLDivElement | null>(null);
+  const [studioGridW, setStudioGridW] = useState(0);
   // Maus über dem Stapel? Dann zieht er sich nicht zurück.
   const [hovered, setHovered] = useState(false);
   // Remount-Schlüssel: beim Hervorkommen aus dem Tab bauen sich die
@@ -262,6 +348,7 @@ export default function PanelApp() {
         setMode("stack");
         setQlId(null);
         setQlSize("normal");
+        setSelectedImageId(null);
       } else if (modeRef.current === "tucked") {
         // Explizit angefordert (Stimme/Insel): aus dem Tab hervorkommen.
         setRevealKey((k) => k + 1);
@@ -283,6 +370,7 @@ export default function PanelApp() {
           setMode("stack");
           setQlId(null);
           setQlSize("normal");
+          setSelectedImageId(null);
           setPendingQl(null);
           return;
         }
@@ -294,7 +382,7 @@ export default function PanelApp() {
         if (target) {
           setQlId(target.id);
           setQlSize(size);
-          setMode("quicklook");
+          setMode(isGalleryArtifact(target) && size !== "large" ? "studio" : "quicklook");
         } else if (e.payload.id) {
           // Artefakt eilt dem panel-state-Spiegel voraus — vormerken.
           setPendingQl({ id: e.payload.id, size });
@@ -321,6 +409,10 @@ export default function PanelApp() {
         setMode("stack");
         setQlId(null);
         setQlSize("normal");
+      } else if (modeRef.current === "studio") {
+        setMode("stack");
+        setQlId(null);
+        setSelectedImageId(null);
       } else {
         void emit("panel-close", {});
       }
@@ -342,9 +434,14 @@ export default function PanelApp() {
   // Wird das Quick-Look-Artefakt geschlossen (z. B. per Stimme), fällt das
   // Fenster in den Stapel zurück.
   useEffect(() => {
-    if (mode === "quicklook" && qlId && !artifacts.some((a) => a.id === qlId)) {
+    if (
+      (mode === "quicklook" || mode === "studio") &&
+      qlId &&
+      !artifacts.some((a) => a.id === qlId)
+    ) {
       setMode("stack");
       setQlId(null);
+      setSelectedImageId(null);
     }
   }, [mode, qlId, artifacts]);
 
@@ -355,7 +452,8 @@ export default function PanelApp() {
     if (artifacts.some((a) => a.id === pendingQl.id)) {
       setQlId(pendingQl.id);
       setQlSize(pendingQl.size);
-      setMode("quicklook");
+      const target = artifacts.find((a) => a.id === pendingQl.id) ?? null;
+      setMode(isGalleryArtifact(target) && pendingQl.size !== "large" ? "studio" : "quicklook");
       setPendingQl(null);
     }
   }, [pendingQl, artifacts]);
@@ -442,10 +540,39 @@ export default function PanelApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, qlArtifact?.id, qlArtifact?.updatedAt, qlSize]);
 
+  useEffect(() => {
+    if (mode !== "studio" || !qlArtifact) return;
+    void layoutImageStudio();
+  }, [mode, qlArtifact?.id, qlArtifact?.updatedAt]);
+
+  useEffect(() => {
+    if (mode !== "studio") return;
+    const el = studioGridRef.current;
+    if (!el) return;
+    const update = () => {
+      const style = window.getComputedStyle(el);
+      const padX =
+        parseFloat(style.paddingLeft || "0") + parseFloat(style.paddingRight || "0");
+      setStudioGridW(Math.floor(el.clientWidth - padX));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mode]);
+
+  useEffect(() => {
+    if (!qlArtifact || qlArtifact.kind !== "image") return;
+    const ids = qlArtifact.imageIds ?? [];
+    if (!selectedImageId || !ids.includes(selectedImageId)) {
+      setSelectedImageId(ids[0] ?? null);
+    }
+  }, [qlArtifact, selectedImageId]);
+
   const openQuickLook = (a: Artifact) => {
     setQlId(a.id);
     setQlSize("normal");
-    setMode("quicklook");
+    setMode(isGalleryArtifact(a) ? "studio" : "quicklook");
     void emit("panel-action", { type: "select", id: a.id });
   };
 
@@ -456,6 +583,156 @@ export default function PanelApp() {
   const onImageAction = (id: string, action: ImageAction) => {
     void emit("panel-action", { type: "image", id, action });
   };
+
+  const openImageFromStudio = (id: string | null) => {
+    if (!id) return;
+    void emit("panel-action", { type: "open-image", id });
+  };
+
+  const switchGalleryFolder = (folderId: string | null) => {
+    void emit("panel-action", { type: "gallery-folder", folderId });
+  };
+
+  if (mode === "studio" && qlArtifact) {
+    const ids = qlArtifact.imageIds ?? [];
+    const selectedId = selectedImageId && ids.includes(selectedImageId)
+      ? selectedImageId
+      : (ids[0] ?? null);
+    const selected = selectedId ? images[selectedId] : null;
+    const currentFolderId = folderIdFromGallery(qlArtifact);
+    const parentIds = selected?.meta?.parent_ids ?? [];
+    const rows = buildStudioRows(ids, images, studioGridW);
+    return (
+      <div className="studio-shell">
+        <div className="studio-bar" data-tauri-drag-region>
+          <button
+            className="ql-close"
+            title="Zurück (Esc)"
+            aria-label="Zurück zum Stapel"
+            onClick={() => {
+              setMode("stack");
+              setQlId(null);
+              setSelectedImageId(null);
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+          <span className="studio-title" data-tauri-drag-region>
+            {qlArtifact.title}
+          </span>
+          <span className="studio-count">{ids.length} Bilder</span>
+        </div>
+        <div className="studio-body">
+          <aside className="studio-rail">
+            <button
+              className={`studio-folder ${!currentFolderId ? "active" : ""}`}
+              onClick={() => switchGalleryFolder(null)}
+            >
+              <span>Alle Bilder</span>
+            </button>
+            {state.imageFolders.map((folder) => (
+              <button
+                key={folder.id}
+                className={`studio-folder ${currentFolderId === folder.id ? "active" : ""}`}
+                onClick={() => switchGalleryFolder(folder.id)}
+              >
+                <span>{folder.name}</span>
+              </button>
+            ))}
+          </aside>
+          <div className="studio-grid-wrap" ref={studioGridRef}>
+            {ids.length === 0 ? (
+              <div className="studio-empty">
+                <p>Dieser Ordner ist noch leer.</p>
+              </div>
+            ) : (
+              <div className="studio-grid">
+                {rows.map((row, rowIndex) => (
+                  <div className="studio-row" key={`${rowIndex}-${row[0]?.id ?? "row"}`}>
+                    {row.map((tile) => {
+                      const st = images[tile.id];
+                      const status = st?.status ?? "generating";
+                      const index = ids.indexOf(tile.id);
+                      return (
+                        <button
+                          key={tile.id}
+                          className={`studio-tile ${selectedId === tile.id ? "selected" : ""} ${status}`}
+                          style={{ width: tile.w, height: tile.h }}
+                          onClick={() => setSelectedImageId(tile.id)}
+                          onDoubleClick={() => openImageFromStudio(tile.id)}
+                        >
+                          <span className="studio-num">{index + 1}</span>
+                          {st?.url ? (
+                            <img src={st.url} alt={st.meta?.name ?? `Bild ${index + 1}`} />
+                          ) : (
+                            <span className="img-placeholder" />
+                          )}
+                          {status === "generating" && <span className="img-life" />}
+                          {status === "error" && (
+                            <span className="img-error">{st?.error ?? "Fehler"}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <aside className="studio-inspector">
+            <div className="studio-preview">
+              {selected?.url ? (
+                <img src={selected.url} alt={selected.meta?.name ?? "Auswahl"} />
+              ) : (
+                <div className="img-placeholder" />
+              )}
+            </div>
+            <div className="studio-meta">
+              <span className="studio-kicker">Auswahl</span>
+              <h2>{selected?.meta?.name ?? (selectedId ? "Bild" : "Kein Bild")}</h2>
+              {selectedId && (
+                <p className="studio-id">
+                  Nr. {ids.indexOf(selectedId) + 1} · {selectedId}
+                </p>
+              )}
+              {selected?.meta?.prompt && <p>{selected.meta.prompt}</p>}
+            </div>
+            <div className="studio-actions">
+              <button onClick={() => openImageFromStudio(selectedId)} disabled={!selectedId}>
+                Groß
+              </button>
+              <button
+                onClick={() => selectedId && onImageAction(selectedId, "favorite")}
+                disabled={!selectedId}
+              >
+                {selected?.meta?.favorite ? "Favorit" : "Merken"}
+              </button>
+              <button onClick={() => selectedId && onImageAction(selectedId, "save")} disabled={!selectedId}>
+                Sichern
+              </button>
+            </div>
+            <div className="studio-lineage">
+              <span className="studio-kicker">Verlauf</span>
+              {parentIds.length > 0 ? (
+                parentIds.map((parentId) => (
+                  <button key={parentId} onClick={() => openImageFromStudio(parentId)}>
+                    Ursprung · {images[parentId]?.meta?.name ?? parentId}
+                  </button>
+                ))
+              ) : (
+                <p>Original oder importierte Referenz.</p>
+              )}
+              {selected?.meta?.operation && (
+                <p className="studio-operation">{selected.meta.operation}</p>
+              )}
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
+  }
 
   // --- Quick Look ---------------------------------------------------
   if (mode === "quicklook" && qlArtifact) {

@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Otto Bildstudio - Ausbauplan</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --page: #0b0b0e;
+        --panel: #151519;
+        --panel-2: #1d1d22;
+        --ink: rgba(255, 255, 255, 0.92);
+        --ink-2: rgba(255, 255, 255, 0.66);
+        --ink-3: rgba(255, 255, 255, 0.45);
+        --hair: rgba(255, 255, 255, 0.1);
+        --violet: oklch(0.75 0.11 300);
+        --ice: oklch(0.82 0.08 220);
+        --amber: oklch(0.79 0.13 75);
+        --red: oklch(0.7 0.16 25);
+        --radius: 14px;
+        --shadow: 0 24px 70px rgba(0, 0, 0, 0.44);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 50% -10%, rgba(255, 255, 255, 0.08), transparent 34rem),
+          var(--page);
+        color: var(--ink);
+        line-height: 1.5;
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 36px));
+        margin: 0 auto;
+        padding: 42px 0 58px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: 1fr minmax(320px, 430px);
+        gap: 28px;
+        align-items: end;
+        padding: 0 0 28px;
+        border-bottom: 1px solid var(--hair);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 780px;
+        font-size: 38px;
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+        text-wrap: balance;
+      }
+
+      h2 {
+        font-size: 19px;
+        letter-spacing: -0.01em;
+      }
+
+      h3 {
+        font-size: 14px;
+        margin-bottom: 8px;
+      }
+
+      .lede {
+        margin-top: 16px;
+        max-width: 74ch;
+        color: var(--ink-2);
+        font-size: 15px;
+      }
+
+      .meta {
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.045);
+        padding: 16px;
+        box-shadow: var(--shadow);
+      }
+
+      .meta p {
+        color: var(--ink-2);
+        font-size: 13px;
+      }
+
+      .pill-row,
+      .phase-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+
+      section {
+        margin-top: 34px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        margin-top: 16px;
+      }
+
+      .two {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .card {
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.032));
+        padding: 16px;
+        min-height: 150px;
+      }
+
+      .card p,
+      li {
+        color: var(--ink-2);
+        font-size: 13px;
+      }
+
+      ul {
+        margin: 10px 0 0;
+        padding-left: 18px;
+      }
+
+      li + li {
+        margin-top: 6px;
+      }
+
+      .studio-mock {
+        margin-top: 16px;
+        border: 1px solid var(--hair);
+        border-radius: 18px;
+        background: #050507;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .mock-bar {
+        height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), transparent);
+        border-bottom: 1px solid var(--hair);
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.22);
+      }
+
+      .mock-title {
+        margin-left: 4px;
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+
+      .mock-body {
+        display: grid;
+        grid-template-columns: 210px 1fr 240px;
+        min-height: 520px;
+      }
+
+      .rail,
+      .inspect {
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .rail {
+        border-right: 1px solid var(--hair);
+      }
+
+      .inspect {
+        border-left: 1px solid var(--hair);
+      }
+
+      .folder {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 7px 9px;
+        border-radius: 8px;
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+
+      .folder.active {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--ink);
+      }
+
+      .canvas {
+        padding: 14px;
+      }
+
+      .thumb-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+
+      .thumb {
+        position: relative;
+        aspect-ratio: 1;
+        border-radius: 10px;
+        overflow: hidden;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent),
+          var(--panel-2);
+        border: 1px solid var(--hair);
+      }
+
+      .thumb:nth-child(2n) {
+        aspect-ratio: 4 / 5;
+      }
+
+      .thumb:nth-child(3n) {
+        aspect-ratio: 16 / 10;
+      }
+
+      .num {
+        position: absolute;
+        top: 7px;
+        left: 7px;
+        min-width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        font-size: 11px;
+      }
+
+      .selected {
+        outline: 2px solid color-mix(in srgb, var(--ice) 70%, white 10%);
+        outline-offset: 2px;
+      }
+
+      .inspect-block {
+        border-bottom: 1px solid var(--hair);
+        padding-bottom: 14px;
+        margin-bottom: 14px;
+      }
+
+      .lineage {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .node {
+        padding: 9px;
+        border: 1px solid var(--hair);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+
+      .node.current {
+        color: var(--ink);
+        box-shadow: inset 2px 0 0 color-mix(in srgb, var(--violet) 80%, transparent);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 14px;
+        overflow: hidden;
+        border-radius: var(--radius);
+        border: 1px solid var(--hair);
+      }
+
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--hair);
+        font-size: 13px;
+      }
+
+      th {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.07);
+        font-weight: 600;
+      }
+
+      td {
+        color: var(--ink-2);
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .flow-step {
+        min-height: 96px;
+        padding: 13px;
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .flow-step strong {
+        display: block;
+        margin-bottom: 7px;
+        font-size: 13px;
+      }
+
+      .flow-step span {
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+
+      .phase {
+        flex: 1 1 220px;
+        padding: 14px;
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .phase b {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .phase span {
+        color: var(--ink-2);
+        font-size: 13px;
+      }
+
+      .voice {
+        color: var(--ink);
+      }
+
+      .note {
+        margin-top: 14px;
+        color: var(--ink-3);
+        font-size: 12px;
+      }
+
+      @media (max-width: 920px) {
+        header,
+        .grid,
+        .two,
+        .mock-body,
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        h1 {
+          font-size: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Otto wird zum sprachgesteuerten Bildstudio.</h1>
+          <p class="lede">
+            Ziel ist kein weiteres Fenster voller App-Chrome. Otto soll beim Entwickeln von Bildern
+            erkennen, dass gerade ein visueller Arbeitsfluss läuft: Galerie groesser, Auswahl
+            klar, Referenzen griffbereit, Varianten nachvollziehbar und alles per Stimme steuerbar.
+          </p>
+        </div>
+        <aside class="meta">
+          <h3>Produktentscheidung</h3>
+          <p>
+            Die Drops bleiben die Materialisierung. Darueber entsteht ein neuer mittlerer
+            Zustand: <strong>Bildstudio</strong>, gross genug zum Arbeiten, kleiner und ruhiger
+            als Vollbild.
+          </p>
+          <div class="pill-row">
+            <span class="pill">Nr. 1 = neuestes Bild</span>
+            <span class="pill">Ordner optional</span>
+            <span class="pill">Lineage sichtbar</span>
+            <span class="pill">Webbilder importierbar</span>
+          </div>
+        </aside>
+      </header>
+
+      <section>
+        <h2>Der neue Zustand</h2>
+        <div class="studio-mock" aria-label="Layout-Skizze Bildstudio">
+          <div class="mock-bar">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="mock-title">Bildstudio · Fun Nails fuer YouTube</span>
+          </div>
+          <div class="mock-body">
+            <nav class="rail">
+              <div class="folder active"><span>Fun Nails fuer YouTube</span><span>38</span></div>
+              <div class="folder"><span>Referenzen</span><span>12</span></div>
+              <div class="folder"><span>Logos</span><span>5</span></div>
+              <div class="folder"><span>Unsortiert</span><span>21</span></div>
+            </nav>
+            <div class="canvas">
+              <div class="thumb-grid">
+                <div class="thumb selected"><span class="num">1</span></div>
+                <div class="thumb"><span class="num">2</span></div>
+                <div class="thumb"><span class="num">3</span></div>
+                <div class="thumb"><span class="num">4</span></div>
+                <div class="thumb"><span class="num">5</span></div>
+                <div class="thumb"><span class="num">6</span></div>
+                <div class="thumb"><span class="num">7</span></div>
+                <div class="thumb"><span class="num">8</span></div>
+                <div class="thumb"><span class="num">9</span></div>
+              </div>
+            </div>
+            <aside class="inspect">
+              <div class="inspect-block">
+                <h3>Bild 1</h3>
+                <p>Aktuellste Variante, erzeugt aus Bild 4 und Logo-Referenz.</p>
+              </div>
+              <h3>Verlauf</h3>
+              <div class="lineage">
+                <div class="node">Original: rohes Thumbnail-Konzept</div>
+                <div class="node">Edit: mehr Kontrast, groessere Naegel</div>
+                <div class="node current">Merge: Bild 4 + Logo-Referenz</div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Sprachworkflow, den Otto verstehen soll</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>Auswahl ohne IDs</h3>
+            <p class="voice">"Mach Bild 2 mal gross."</p>
+            <p>"Bild 1" meint das neueste Bild im aktuellen Kontext. Wenn das Bildstudio offen ist,
+            bezieht sich die Nummer auf die sichtbare Galerie, sonst auf die gesamte Bibliothek.</p>
+          </article>
+          <article class="card">
+            <h3>Bearbeiten als Kette</h3>
+            <p class="voice">"Bearbeite bitte das Ampel-Zwei."</p>
+            <p>Otto loest Namen, Nummern und Auswahl auf, erzeugt neue Varianten und speichert
+            die Elternbeziehung automatisch.</p>
+          </article>
+          <article class="card">
+            <h3>Mehrere Bilder kombinieren</h3>
+            <p class="voice">"Nimm Bild 1 und Bild 5 und fueg das zusammen."</p>
+            <p>Mehrbild-Edits werden ein eigenes Werkzeug, nicht ein Prompt-Hack. Die Galerie zeigt
+            danach, welche Inputs verwendet wurden.</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Datenmodell</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Baustein</th>
+              <th>Warum er gebraucht wird</th>
+              <th>Vorschlag</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Ordner</td>
+              <td>Der Nutzer denkt in Projekten wie "Fun Nails fuer YouTube", nicht in globalen IDs.</td>
+              <td>Ordner sind optionale Sammlungen. Ein Bild kann in mehreren Ordnern sein.</td>
+            </tr>
+            <tr>
+              <td>Aktiver Arbeitskontext</td>
+              <td>Otto soll "neue Fun Nails" automatisch im passenden Ordner speichern.</td>
+              <td>Beim Oeffnen eines Ordners wird er zum aktuellen Bildkontext, bis der Nutzer wechselt.</td>
+            </tr>
+            <tr>
+              <td>Lineage</td>
+              <td>Originale, Edits und Merges sollen spaeter nachvollziehbar bleiben.</td>
+              <td>Jedes Bild bekommt parent_ids, operation, prompt, source und created_ms.</td>
+            </tr>
+            <tr>
+              <td>Web-Referenzen</td>
+              <td>Recherchebilder sollen nicht nur Treffer sein, sondern bearbeitbare Referenzen.</td>
+              <td>Suchtreffer bekommen eine Aktion "in Galerie aufnehmen" und speichern Quelle + Lizenzhinweis.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Werkzeug-Fluss</h2>
+        <div class="flow">
+          <div class="flow-step"><strong>Suchen</strong><span>Brave-Bildsuche liefert visuelle Treffer.</span></div>
+          <div class="flow-step"><strong>Importieren</strong><span>Treffer, Datei oder URL wird Galerie-Bild.</span></div>
+          <div class="flow-step"><strong>Auswaehlen</strong><span>Nummern gelten im sichtbaren Kontext.</span></div>
+          <div class="flow-step"><strong>Generieren</strong><span>Neue Varianten landen im aktiven Ordner.</span></div>
+          <div class="flow-step"><strong>Nachvollziehen</strong><span>Lineage zeigt Original, Edit und Merge.</span></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Ausbaustufen</h2>
+        <div class="phase-list">
+          <div class="phase">
+            <b>1. Sprachanker</b>
+            <span>Nummerierung neueste zuerst, Galerie-Kontext in Instructions, bessere Tool-Beschreibungen.</span>
+          </div>
+          <div class="phase">
+            <b>2. Bildstudio-Fenster</b>
+            <span>Mittlere Galerieansicht mit Ordnerleiste, Auswahlzustand und Inspektor statt nur Quick Look.</span>
+          </div>
+          <div class="phase">
+            <b>3. Ordner & Kontext</b>
+            <span>Ordner anlegen, Bilder verschieben, aktive Ordner merken und automatisch als Ziel verwenden.</span>
+          </div>
+          <div class="phase">
+            <b>4. Lineage & Merge</b>
+            <span>parent_ids, Versionskette, Original anzeigen, mehrere Referenzbilder fuer Edit-Calls.</span>
+          </div>
+          <div class="phase">
+            <b>5. Recherche zu Referenz</b>
+            <span>Bildsuchtreffer direkt importieren, Quellen erhalten und als Modellreferenzen nutzen.</span>
+          </div>
+        </div>
+        <p class="note">
+          Wichtig: Farbe bleibt Zustand, nicht Dekoration. Das Studio nutzt Ottos schwarzes Material,
+          klare Nummern und ruhige macOS-nahe Bedienelemente.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

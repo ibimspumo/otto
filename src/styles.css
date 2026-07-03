@@ -894,6 +894,315 @@ button {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Bildstudio — mittlere Galeriefläche für Sprach-Workflows            */
+/* ------------------------------------------------------------------ */
+
+.studio-shell {
+  height: 100vh;
+  width: 100vw;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--glass-tint);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: ql-in 320ms var(--ease-system);
+  isolation: isolate;
+}
+
+.studio-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.12), transparent 28%),
+    radial-gradient(circle at 88% 8%, color-mix(in srgb, var(--violet) 18%, transparent), transparent 30%);
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.studio-bar {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: linear-gradient(to bottom, var(--glass-tint-strong), transparent);
+}
+
+.studio-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.studio-count {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.studio-body {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) 254px;
+}
+
+.studio-rail,
+.studio-inspector {
+  min-height: 0;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.studio-rail {
+  padding: 10px;
+  border-right: 1px solid var(--hair);
+  overflow-y: auto;
+}
+
+.studio-folder {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.studio-folder span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-folder:hover {
+  background: var(--fill);
+  color: var(--ink);
+}
+
+.studio-folder.active {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+.studio-grid-wrap {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px;
+}
+
+.studio-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 100%;
+}
+
+.studio-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.studio-tile {
+  position: relative;
+  flex: none;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--hair);
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.studio-tile:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.studio-tile.selected {
+  border-color: rgba(255, 255, 255, 0.46);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.studio-tile img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.studio-tile .img-placeholder {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.studio-tile.generating img {
+  filter: blur(4px) saturate(1.04);
+}
+
+.studio-num {
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  left: 7px;
+  min-width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--ink);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.studio-empty {
+  height: 100%;
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.studio-inspector {
+  border-left: 1px solid var(--hair);
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.studio-preview {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid var(--hair);
+  background: #000;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+
+.studio-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.studio-meta {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.studio-kicker {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.studio-meta h2 {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.25;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.studio-meta p,
+.studio-lineage p {
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.studio-id {
+  color: var(--ink-3) !important;
+  font-family: var(--font-mono);
+  margin-bottom: 8px;
+}
+
+.studio-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.studio-actions button,
+.studio-lineage button {
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+
+.studio-actions button:hover,
+.studio-lineage button:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+.studio-actions button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.studio-lineage {
+  padding-top: 12px;
+}
+
+.studio-lineage button {
+  width: 100%;
+  display: block;
+  padding: 6px 8px;
+  text-align: left;
+  margin-bottom: 6px;
+}
+
+.studio-operation {
+  margin-top: 8px;
+  color: var(--ink-3) !important;
+  font-family: var(--font-mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-shell {
+    animation: none;
+  }
+}
+
 /* --- Gläserne Jobs: Vollansicht im Quick Look ---------------------- */
 
 .job-term {
@@ -1854,7 +2163,43 @@ textarea {
 
 .btn-row {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+
+.status-pill {
+  min-width: 92px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--hair);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.status-pill.ok {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--ink);
+}
+
+.status-pill.warn {
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 5px 14px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.status-grid span:nth-child(2n) {
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
 .key-input {

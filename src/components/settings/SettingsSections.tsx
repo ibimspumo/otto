@@ -1,5 +1,5 @@
 import type { Update } from "../../lib/updater";
-import type { Diagnostics, Settings } from "../../lib/types";
+import type { CodexComputerUseStatus, Diagnostics, Settings } from "../../lib/types";
 import type { ImageModelInfo } from "../../lib/imagegen";
 import { Group, KeyInput, Row, Switch } from "./SettingsControls";
 
@@ -471,9 +471,22 @@ export function CapabilitySettings({
   form,
   set,
   cliStatus,
+  computerUseStatus,
+  computerUseChecking,
+  onCheckComputerUse,
 }: SectionProps & {
   cliStatus: { codex: boolean; claude: boolean } | null;
+  computerUseStatus: CodexComputerUseStatus | null;
+  computerUseChecking: boolean;
+  onCheckComputerUse: () => void;
 }) {
+  const cu = computerUseStatus;
+  const cuSummary = cu
+    ? cu.ready
+      ? "bereit"
+      : "nicht bereit"
+    : "noch nicht geprüft";
+
   return (
     <>
       <Group title="Werkzeuge — deaktivierte werden Otto gar nicht erst angeboten (gilt ab der nächsten Verbindung).">
@@ -531,6 +544,63 @@ export function CapabilitySettings({
             onChange={(e) => set({ cli_notes: e.target.value })}
           />
         </Row>
+      </Group>
+      <Group title="Mac-Oberflächen">
+        <Row
+          label="Codex Computer Use"
+          hint={
+            <>
+              Otto kann sichtbare macOS-Apps über das lokale Computer-Use-Plugin
+              aus Codex steuern. Das braucht Codex Desktop, das installierte
+              Computer-Use-Plugin sowie macOS-Freigaben für Bildschirmaufnahme und
+              Bedienungshilfen. Gilt ab der nächsten Verbindung.
+            </>
+          }
+        >
+          <Switch
+            label="Codex Computer Use erlauben"
+            checked={form.codex_computer_use_enabled}
+            onChange={(v) => set({ codex_computer_use_enabled: v })}
+          />
+        </Row>
+        <Row
+          label="Status"
+          hint={cu?.hint ?? "Prüft Codex-App, Plugin, lokalen MCP-Client und Dienst."}
+        >
+          <span className="btn-row">
+            <span className={`status-pill ${cu?.ready ? "ok" : cu ? "warn" : ""}`}>
+              {cuSummary}
+            </span>
+            <button
+              className="push"
+              type="button"
+              disabled={computerUseChecking}
+              onClick={onCheckComputerUse}
+            >
+              {computerUseChecking ? "Prüfe…" : "Prüfen"}
+            </button>
+          </span>
+        </Row>
+        {cu && (
+          <Row
+            wide
+            label="Gefunden"
+            hint="Die Prüfung startet keinen Otto-Workflow; sie schaut nur, ob die lokale Codex-Computer-Use-Kette erreichbar ist."
+          >
+            <div className="status-grid">
+              <span>Codex.app</span>
+              <span>{cu.codex_app ? "ja" : "nein"}</span>
+              <span>Plugin installiert</span>
+              <span>{cu.installed_plugin ? "ja" : cu.bundled_plugin ? "gebündelt" : "nein"}</span>
+              <span>MCP-Test</span>
+              <span>{cu.mcp_probe_ok ? "ok" : "fehlt"}</span>
+              <span>App-Server</span>
+              <span>{cu.app_server_running ? "läuft" : "ruht"}</span>
+              <span>Dienst</span>
+              <span>{cu.computer_use_service_running ? "läuft" : "ruht"}</span>
+            </div>
+          </Row>
+        )}
       </Group>
       <Group title="MCP-Server">
         <Row

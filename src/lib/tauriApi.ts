@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  CliDonePayload,
+  CodexComputerUseStatus,
   Diagnostics,
+  ImageFolder,
   ImageMeta,
   SearchResult,
   SessionSearchHit,
@@ -46,6 +49,15 @@ export const requestAccessibility = () =>
 
 export const imagesList = () => invoke<ImageMeta[]>("images_list");
 
+export const imageFoldersList = () =>
+  invoke<ImageFolder[]>("image_folders_list");
+
+export const imageFolderCreate = (name: string) =>
+  invoke<ImageFolder>("image_folder_create", { name });
+
+export const imageSetFolder = (id: string, folderId?: string | null) =>
+  invoke<void>("image_set_folder", { id, folderId });
+
 export const imageStore = (
   id: string,
   name: string,
@@ -53,7 +65,23 @@ export const imageStore = (
   b64: string,
   transparent: boolean,
   size: string,
-) => invoke<ImageMeta>("image_store", { id, name, prompt, b64, transparent, size });
+  folderId?: string | null,
+  parentIds: string[] = [],
+  operation?: string,
+  sourceUrl?: string | null,
+) =>
+  invoke<ImageMeta>("image_store", {
+    id,
+    name,
+    prompt,
+    b64,
+    transparent,
+    size,
+    folderId,
+    parentIds,
+    operation,
+    sourceUrl,
+  });
 
 export const imageReadB64 = (id: string) =>
   invoke<string>("image_read_b64", { id });
@@ -69,11 +97,22 @@ export const imageFavorite = (id: string, favorite: boolean) =>
 export const imageExport = (id: string, dest?: string) =>
   invoke<string>("image_export", { id, dest });
 
-export const imageImport = (source: string, name?: string, newerThanMs?: number) =>
-  invoke<ImageMeta>("image_import", { source, name, newerThanMs });
+export const imageImport = (
+  source: string,
+  name?: string,
+  newerThanMs?: number,
+  folderId?: string | null,
+) => invoke<ImageMeta>("image_import", { source, name, newerThanMs, folderId });
 
-export const cliJobStart = (agent: string, task: string, cwd?: string) =>
-  invoke<string>("cli_job_start", { agent, task, cwd });
+export const cliJobStart = (
+  agent: string,
+  task: string,
+  cwd?: string,
+  reportOnDone?: boolean,
+) => invoke<string>("cli_job_start", { agent, task, cwd, reportOnDone });
+
+export const cliJobResult = (jobId: string) =>
+  invoke<CliDonePayload | null>("cli_job_result", { jobId });
 
 export const codexImageJobStart = (
   task: string,
@@ -86,6 +125,12 @@ export const cliJobCancel = (jobId: string) =>
 
 export const cliAvailable = () =>
   invoke<{ codex: boolean; claude: boolean }>("cli_available");
+
+export const codexComputerUseStatus = () =>
+  invoke<CodexComputerUseStatus>("codex_computer_use_status");
+
+export const codexComputerUseCall = (args: Record<string, unknown>) =>
+  invoke<Record<string, unknown>>("codex_computer_use_call", { args });
 
 export const wakeWordStart = (phrases: string[]) =>
   invoke<void>("wake_word_start", { phrases });

@@ -6,6 +6,7 @@
 // aufgeht — und die Einstellungen (Label "settings", echtes macOS-Fenster).
 
 import { invoke } from "@tauri-apps/api/core";
+import { setDockVisibility } from "@tauri-apps/api/app";
 import { emit } from "@tauri-apps/api/event";
 import {
   availableMonitors,
@@ -258,6 +259,35 @@ export async function layoutQuickLook(
   }
 }
 
+/**
+ * Bildstudio: eine mittlere Arbeitsfläche für Galerie/Referenzen.
+ * Größer als ein Drop, ruhiger als Vollbild; Sprache bleibt die Hauptfläche.
+ */
+export async function layoutImageStudio(): Promise<void> {
+  try {
+    const panel = await panelWindow();
+    const monitor = await activeMonitor();
+    if (!panel || !monitor) return;
+    const sf = monitor.scaleFactor;
+    const area = workArea(monitor);
+    const usableW = area.right - area.left;
+    const usableH = area.bottom - area.top;
+    const { w, h } = fitWithin(1080, 720, usableW * 0.84, usableH * 0.82);
+    const x = area.x + (area.w - w) / 2;
+    const y = Math.max(area.top, area.y + (area.h - h) / 2 - 10);
+    await invoke("panel_vibrancy", { enable: true, radius: QL_RADIUS }).catch(
+      () => {},
+    );
+    await panel.setShadow(false).catch(() => {});
+    await panel.setSize(new PhysicalSize(Math.round(w * sf), Math.round(h * sf)));
+    await panel.setPosition(new PhysicalPosition(Math.round(x * sf), Math.round(y * sf)));
+    await panel.setAlwaysOnTop(false);
+    await panel.setFocus();
+  } catch {
+    // Ignorieren.
+  }
+}
+
 // Der Leucht-Tab: schmaler Streifen an der linken Kante, wenn der Stapel
 // sich zurückgezogen hat. Licht statt Fläche — und bewusst ein winziges
 // Fenster, damit keine unsichtbare Fläche Klicks frisst.
@@ -328,6 +358,7 @@ export async function showSettings(section?: SettingsSection): Promise<void> {
   try {
     const win = await WebviewWindow.getByLabel("settings");
     if (!win) return;
+    await setDockVisibility(true).catch(() => {});
     await win.show();
     await win.unminimize().catch(() => {});
     await win.setFocus();

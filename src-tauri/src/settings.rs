@@ -19,6 +19,10 @@ pub struct Settings {
     /// Bewusst kein Default: normale Bildgenerierung läuft weiter über die
     /// Images API, bis der Nutzer Codex ausdrücklich wählt.
     pub codex_imagegen_enabled: bool,
+    /// Lokale Mac-Steuerung über das von Codex Desktop mitgelieferte
+    /// Computer-Use-MCP. Bewusst opt-in, weil es GUI-Zustand außerhalb von
+    /// Ottos Workspace sehen und bedienen kann.
+    pub codex_computer_use_enabled: bool,
     pub terminal_enabled: bool,
     pub wake_word_enabled: bool,
     pub wake_word_phrase: String,
@@ -56,6 +60,7 @@ impl Default for Settings {
             reasoning_effort: String::new(),
             image_model: String::new(),
             codex_imagegen_enabled: false,
+            codex_computer_use_enabled: false,
             terminal_enabled: true,
             wake_word_enabled: false,
             wake_word_phrase: "Hey Otto".into(),

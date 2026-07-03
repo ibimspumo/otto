@@ -1,9 +1,10 @@
-// Hintergrund-Jobs für lokale CLI-Agenten (Codex CLI, Claude CLI).
+// Sichtbare Jobs für Terminal-Läufe und lokale CLI-Agenten (Codex/Claude).
 //
 // delegate_task startet einen Job und kehrt sofort mit einer job_id zurück —
-// Otto bleibt ansprechbar. Der Fortschritt kommt zeilenweise als "cli-line"-
-// Event, das Endergebnis als "cli-done"-Event; App.tsx reicht es dann als
-// Systemnachricht in die Realtime-Session zurück.
+// Nicht-blockierende Läufe kehren sofort mit job_id zurück. Wartende Terminal-
+// Läufe nutzen dieselbe Infrastruktur, warten im Frontend aber auf "cli-done".
+// Fortschritt kommt zeilenweise als "cli-line"-Event, das Endergebnis als
+// "cli-done"-Event.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader};
@@ -30,6 +31,11 @@ fn jobs() -> &'static Mutex<HashMap<String, i32>> {
 fn cancelled() -> &'static Mutex<HashSet<String>> {
     static CANCELLED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     CANCELLED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn done_results() -> &'static Mutex<HashMap<String, CliDone>> {
+    static DONE_RESULTS: OnceLock<Mutex<HashMap<String, CliDone>>> = OnceLock::new();
+    DONE_RESULTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn shell_quote(s: &str) -> String {
@@ -67,7 +73,7 @@ struct CliLine {
 }
 
 #[derive(Serialize, Clone)]
-struct CliDone {
+pub struct CliDone {
     job_id: String,
     agent: String,
     task: String,
@@ -75,6 +81,7 @@ struct CliDone {
     output: String,
     stderr: String,
     cancelled: bool,
+    report_on_done: bool,
 }
 
 fn kill_group(pid: i32, signal: i32) {
@@ -100,6 +107,7 @@ fn start_job(
     task: String,
     dir: String,
     cmdline: String,
+    report_on_done: bool,
 ) -> Result<String, String> {
     if !std::path::Path::new(&dir).is_dir() {
         return Err(format!("Arbeitsverzeichnis existiert nicht: {dir}"));
@@ -195,18 +203,26 @@ fn start_job(
             let was_cancelled = cancelled().lock().unwrap().remove(&job_id);
             let output = truncate_tail(&out_buf.lock().unwrap(), 12_000);
             let stderr_out = truncate_tail(&err_buf.lock().unwrap(), 4_000);
-            let _ = app.emit(
-                "cli-done",
-                CliDone {
-                    job_id,
-                    agent,
-                    task,
-                    exit_code: status.ok().and_then(|s| s.code()),
-                    output,
-                    stderr: stderr_out,
-                    cancelled: was_cancelled,
-                },
-            );
+            let done = CliDone {
+                job_id: job_id.clone(),
+                agent,
+                task,
+                exit_code: status.ok().and_then(|s| s.code()),
+                output,
+                stderr: stderr_out,
+                cancelled: was_cancelled,
+                report_on_done,
+            };
+            {
+                let mut results = done_results().lock().unwrap();
+                if results.len() > 100 {
+                    if let Some(oldest) = results.keys().next().cloned() {
+                        results.remove(&oldest);
+                    }
+                }
+                results.insert(job_id, done.clone());
+            }
+            let _ = app.emit("cli-done", done);
         });
     }
 
@@ -219,13 +235,14 @@ pub fn cli_job_start(
     agent: String,
     task: String,
     cwd: Option<String>,
+    report_on_done: Option<bool>,
 ) -> Result<String, String> {
     let task = task.trim().to_string();
     if task.is_empty() {
         return Err("Leere Aufgabe.".into());
     }
     // YOLO-Modus: die CLI-Agenten bekommen vollen System-/Netzzugriff,
-    // der Hintergrund-Shell-Job läuft ohne Befehls-Filter.
+    // Shell-Jobs laufen ohne Befehls-Filter.
     let yolo = crate::settings::yolo_enabled(&app);
     let cmdline = match agent.as_str() {
         "codex" => {
@@ -243,8 +260,8 @@ pub fn cli_job_start(
             };
             format!("{CLI_PATH_SETUP}claude -p {} {perm}", shell_quote(&task))
         }
-        // Hintergrund-Terminal: task IST der Shell-Befehl. Gleiche
-        // Infrastruktur wie die CLI-Agenten (Streaming, Cancel, Watchdog).
+        // Terminal: task IST der Shell-Befehl. Gleiche Infrastruktur wie die
+        // CLI-Agenten (Streaming, Cancel, Watchdog).
         "shell" => {
             if !yolo {
                 crate::shell_safety::validate_shell_command(&task)?;
@@ -257,7 +274,12 @@ pub fn cli_job_start(
         .map(|d| expand_tilde(d.trim()))
         .filter(|d| !d.is_empty())
         .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into()));
-    start_job(app, agent, task, dir, cmdline)
+    start_job(app, agent, task, dir, cmdline, report_on_done.unwrap_or(true))
+}
+
+#[tauri::command]
+pub fn cli_job_result(job_id: String) -> Result<Option<CliDone>, String> {
+    Ok(done_results().lock().unwrap().get(&job_id).cloned())
 }
 
 /// Spezialpfad für Codex' eingebaute imagegen-Skill. Er benutzt `--image … --`
@@ -306,7 +328,7 @@ pub fn codex_image_job_start(
     }
     cmdline.push_str("-- ");
     cmdline.push_str(&shell_quote(&task));
-    start_job(app, "codex-image".into(), task, dir, cmdline)
+    start_job(app, "codex-image".into(), task, dir, cmdline, true)
 }
 
 #[tauri::command]

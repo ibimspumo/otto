@@ -70,8 +70,8 @@ export default function Island({
     if (state === "thinking") return "denkt nach…";
     if (jobs.length > 0 && !hovered) {
       return jobs.length === 1
-        ? `${jobs[0].agent} arbeitet im Hintergrund…`
-        : `${jobs.length} Jobs laufen im Hintergrund…`;
+        ? `${jobs[0].agent} arbeitet…`
+        : `${jobs.length} Jobs laufen…`;
     }
     return null;
   }, [error, state, activity, jobs, hovered]);

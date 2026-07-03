@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   appDiagnostics,
   cliAvailable,
+  codexComputerUseStatus,
   logLine,
   requestAccessibility,
   saveSettings,
@@ -10,7 +11,7 @@ import {
 import { fetchImageModels, IMAGE_MODELS, type ImageModelInfo } from "../lib/imagegen";
 import { checkForUpdate, installAndRelaunch, type Update } from "../lib/updater";
 import type { SettingsSection } from "../lib/hudWindow";
-import type { Diagnostics, Settings } from "../lib/types";
+import type { CodexComputerUseStatus, Diagnostics, Settings } from "../lib/types";
 import {
   ActivationSettings,
   CapabilitySettings,
@@ -48,6 +49,9 @@ export default function SettingsPanel({
     codex: boolean;
     claude: boolean;
   } | null>(null);
+  const [computerUseStatus, setComputerUseStatus] =
+    useState<CodexComputerUseStatus | null>(null);
+  const [computerUseChecking, setComputerUseChecking] = useState(false);
   const [imageModels, setImageModels] = useState<ImageModelInfo[]>(
     IMAGE_MODELS.map((m) => ({ id: m.id, label: m.label, provider: m.provider })),
   );
@@ -158,6 +162,31 @@ export default function SettingsPanel({
     }
   }
 
+  async function checkComputerUse() {
+    setComputerUseChecking(true);
+    try {
+      setComputerUseStatus(await codexComputerUseStatus());
+    } catch (e) {
+      void logLine(`codex computer use status failed: ${String(e)}`);
+      setComputerUseStatus({
+        codex_cli: false,
+        codex_version: null,
+        codex_app: false,
+        app_server_running: false,
+        bundled_plugin: false,
+        installed_plugin: false,
+        computer_use_service_running: false,
+        mcp_client: null,
+        mcp_probe_ok: false,
+        mcp_tool_count: 0,
+        ready: false,
+        hint: String(e),
+      });
+    } finally {
+      setComputerUseChecking(false);
+    }
+  }
+
   const shared = { form, set };
   const body = (() => {
     switch (section) {
@@ -198,7 +227,15 @@ export default function SettingsPanel({
       case "gedaechtnis":
         return <MemorySettings {...shared} />;
       case "faehigkeiten":
-        return <CapabilitySettings {...shared} cliStatus={cliStatus} />;
+        return (
+          <CapabilitySettings
+            {...shared}
+            cliStatus={cliStatus}
+            computerUseStatus={computerUseStatus}
+            computerUseChecking={computerUseChecking}
+            onCheckComputerUse={() => void checkComputerUse()}
+          />
+        );
       case "diagnose":
         return <DiagnosticsSettings diag={diag} onRefresh={refreshDiag} />;
     }

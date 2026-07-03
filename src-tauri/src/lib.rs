@@ -1,5 +1,6 @@
 mod agent_files;
 mod cli;
+mod computer_use;
 mod context;
 mod diagnostics;
 mod fs_util;
@@ -76,6 +77,8 @@ pub fn run() {
                 if window.label() == "settings" {
                     api.prevent_close();
                     let _ = window.hide();
+                    #[cfg(target_os = "macos")]
+                    let _ = window.app_handle().set_dock_visibility(false);
                 }
             }
         })
@@ -101,9 +104,12 @@ pub fn run() {
             context::clipboard_image,
             context::file_read_b64,
             cli::cli_job_start,
+            cli::cli_job_result,
             cli::codex_image_job_start,
             cli::cli_job_cancel,
             cli::cli_available,
+            computer_use::codex_computer_use_status,
+            computer_use::codex_computer_use_call,
             wake::wake_word_start,
             wake::wake_word_stop,
             sessions::session_start,
@@ -123,6 +129,9 @@ pub fn run() {
             skills::skill_write,
             skills::skill_delete,
             images::images_list,
+            images::image_folders_list,
+            images::image_folder_create,
+            images::image_set_folder,
             images::image_store,
             images::image_read_b64,
             images::image_delete,

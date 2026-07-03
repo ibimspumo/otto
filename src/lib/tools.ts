@@ -134,7 +134,7 @@ export const toolDefs = [
     type: "function",
     name: "run_terminal",
     description:
-      "Führt einen kurzen Shell-Befehl auf dem Mac aus (zsh) und liefert stdout/stderr/exit_code. Gedacht für Systemaufgaben wie Apps öffnen oder Status auslesen. Standardmäßig gilt eine strenge Positivliste: destruktive Befehle, Datei-Umleitungen, Downloads, Netzwerk-Shell-Pipelines, Rechteänderungen und freie AppleScript-Automation werden blockiert. Ist der YOLO-Modus aktiv (Systemnachricht sagt es dir), entfallen diese Schranken und du hast vollen Terminal-Zugriff mit den Rechten des Nutzers. Für alles, was länger als ~20 Sekunden dauern könnte, setze background=true: der Befehl läuft dann als Hintergrund-Job, du bekommst sofort eine job_id und bleibst ansprechbar; das Ergebnis kommt automatisch als Systemnachricht (abbrechen mit cancel_job).",
+      "Führt einen Shell-Befehl auf dem Mac aus (zsh) und zeigt ihn immer als sichtbaren Live-Terminal-Job im Drop-Stapel. Ohne background wartet der Tool-Call auf stdout/stderr/exit_code (für kurze Systemaufgaben wie Apps öffnen oder Status auslesen); mit background=true kehrt er sofort mit job_id zurück und das Ergebnis kommt automatisch als Systemnachricht. Standardmäßig gilt eine strenge Positivliste: destruktive Befehle, Datei-Umleitungen, Downloads, Netzwerk-Shell-Pipelines, Rechteänderungen und freie AppleScript-Automation werden blockiert. Ist der YOLO-Modus aktiv (Systemnachricht sagt es dir), entfallen diese Schranken und du hast vollen Terminal-Zugriff mit den Rechten des Nutzers. Für alles, was länger als ~20 Sekunden dauern könnte, setze background=true (Zwischenstand: read_job_output; groß zeigen: show_job; abbrechen: cancel_job).",
     parameters: {
       type: "object",
       properties: {
@@ -146,7 +146,7 @@ export const toolDefs = [
         background: {
           type: "boolean",
           description:
-            "true = als Hintergrund-Job starten (sofortige Rückkehr mit job_id)",
+            "true = nicht warten, sondern sofort mit job_id zurückkehren",
         },
       },
       required: ["command"],
@@ -182,9 +182,95 @@ export const toolDefs = [
   },
   {
     type: "function",
+    name: "computer_use",
+    description:
+      "Steuert sichtbare macOS-Apps über Codex Computer Use. Nutze dies nur, wenn die Aufgabe wirklich eine grafische Oberfläche braucht. Rufe zuerst action=\"list_apps\" oder action=\"get_state\" für die Ziel-App auf; nutze danach element_index aus dem Accessibility-Baum, nicht geratenen Koordinaten. Frage den Nutzer direkt vor riskanten GUI-Aktionen um Bestätigung: Löschen, Senden/Posten/Bestellen/Kaufen, Account-/Rechte-/Systemänderungen, sensible Daten eingeben oder Dateien hochladen.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: [
+            "list_apps",
+            "get_state",
+            "click",
+            "type_text",
+            "press_key",
+            "set_value",
+            "scroll",
+            "drag",
+            "select_text",
+            "secondary_action",
+          ],
+          description:
+            "list_apps = verfügbare Apps; get_state = Screenshot/Accessibility-Baum holen; danach UI-Aktion ausführen.",
+        },
+        app: {
+          type: "string",
+          description:
+            "App-Name, Pfad oder Bundle-ID, z. B. Finder, Safari, TextEdit, com.apple.finder. Für list_apps leer lassen.",
+        },
+        element_index: {
+          type: "string",
+          description:
+            "Element-ID aus get_state, z. B. \"12\". Bevorzugt gegenüber Koordinaten.",
+        },
+        text: {
+          type: "string",
+          description:
+            "Text für type_text oder Zieltext für select_text.",
+        },
+        value: { type: "string", description: "Wert für set_value." },
+        key: {
+          type: "string",
+          description:
+            "Taste/Tastenkombi für press_key, z. B. Return, Tab, super+c.",
+        },
+        direction: {
+          type: "string",
+          enum: ["up", "down", "left", "right"],
+          description: "Scrollrichtung.",
+        },
+        pages: { type: "number", description: "Scroll-Seiten, Standard 1." },
+        x: { type: "number", description: "Screenshot-X-Koordinate für click." },
+        y: { type: "number", description: "Screenshot-Y-Koordinate für click." },
+        from_x: { type: "number", description: "Drag-Start X." },
+        from_y: { type: "number", description: "Drag-Start Y." },
+        to_x: { type: "number", description: "Drag-Ziel X." },
+        to_y: { type: "number", description: "Drag-Ziel Y." },
+        click_count: { type: "number", description: "Anzahl Klicks, Standard 1." },
+        mouse_button: {
+          type: "string",
+          enum: ["left", "right", "middle"],
+          description: "Maustaste für click, Standard left.",
+        },
+        selection: {
+          type: "string",
+          enum: ["text", "cursor_before", "cursor_after"],
+          description: "select_text-Modus.",
+        },
+        prefix: {
+          type: "string",
+          description: "Optionaler Text direkt vor dem Zieltext für select_text.",
+        },
+        suffix: {
+          type: "string",
+          description: "Optionaler Text direkt nach dem Zieltext für select_text.",
+        },
+        secondary_action: {
+          type: "string",
+          description:
+            "Sekundäre Accessibility-Aktion für action=secondary_action, z. B. Raise.",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    type: "function",
     name: "cancel_job",
     description:
-      "Bricht einen laufenden Hintergrund-Job ab (von delegate_task). \"all\" bricht alle laufenden Jobs ab. Nutze dies sofort, wenn der Nutzer abbrechen will.",
+      "Bricht einen laufenden sichtbaren Job ab (Terminal, delegate_task, Codex-Bildjob). \"all\" bricht alle laufenden Jobs ab. Nutze dies sofort, wenn der Nutzer abbrechen will.",
     parameters: {
       type: "object",
       properties: {
@@ -197,7 +283,7 @@ export const toolDefs = [
     type: "function",
     name: "read_job_output",
     description:
-      "Liest den aktuellen Live-Output eines Hintergrund-Jobs (letzte Zeilen + Status), WÄHREND er läuft — damit kannst du dem Nutzer jederzeit sagen, was der Job gerade tut oder woran er hängt. Ohne job_id: der neueste Job. Funktioniert auch nach Job-Ende.",
+      "Liest den aktuellen Live-Output eines sichtbaren Jobs (letzte Zeilen + Status), WÄHREND er läuft — damit kannst du dem Nutzer jederzeit sagen, was der Job gerade tut oder woran er hängt. Ohne job_id: der neueste Job. Funktioniert auch nach Job-Ende.",
     parameters: {
       type: "object",
       properties: {
@@ -216,7 +302,7 @@ export const toolDefs = [
     type: "function",
     name: "show_job",
     description:
-      "Holt das Live-Terminal eines Hintergrund-Jobs groß in den Vordergrund (Quick Look) — wenn der Nutzer sehen will, was da gerade passiert („zeig mir das Terminal“, „hol den Job nach vorn“). Ohne job_id: der neueste Job.",
+      "Holt das Live-Terminal eines sichtbaren Jobs groß in den Vordergrund (Quick Look) — wenn der Nutzer sehen will, was da gerade passiert („zeig mir das Terminal“, „hol den Job nach vorn“). Ohne job_id: der neueste Job.",
     parameters: {
       type: "object",
       properties: {
@@ -292,7 +378,7 @@ export const toolDefs = [
     type: "function",
     name: "generate_image",
     description:
-      "Generiert 1–8 Bilder und zeigt sie im Artefakt-Panel. Standard ist der normale API-Bildmodus aus den Einstellungen (GPT Image 2 oder OpenRouter). Wenn der Nutzer ausdrücklich Codex/ChatGPT-Abo/Codex-Bildgenerierung wünscht und die Systeminfo sagt, dass es aktiviert ist, setze provider=\"codex\"; dann läuft es als Hintergrund-Job und wird nach Abschluss importiert. Bei Logos/Icons/Stickern im API-Modus setze transparent=true (wechselt automatisch zu gpt-image-1).",
+      "Generiert 1–8 Bilder und zeigt sie im Artefakt-Panel. Standard ist der normale API-Bildmodus aus den Einstellungen (GPT Image 2 oder OpenRouter). Wenn der Nutzer ausdrücklich Codex/ChatGPT-Abo/Codex-Bildgenerierung wünscht und die Systeminfo sagt, dass es aktiviert ist, setze provider=\"codex\"; dann läuft es als sichtbarer Job und wird nach Abschluss importiert. Bei Logos/Icons/Stickern im API-Modus setze transparent=true (wechselt automatisch zu gpt-image-1).",
     parameters: {
       type: "object",
       properties: {
@@ -318,6 +404,11 @@ export const toolDefs = [
           description: "Transparenter Hintergrund (Logos, Icons, Sticker)",
         },
         name: { type: "string", description: "Kurzer Name fürs Bild (Galerie)" },
+        folder: {
+          type: "string",
+          description:
+            "Optionaler Bildordner/Projektkontext. Wenn nicht angegeben, nutzt Otto den aktuell geöffneten Bildstudio-Ordner.",
+        },
         model: {
           type: "string",
           description:
@@ -337,14 +428,20 @@ export const toolDefs = [
     type: "function",
     name: "edit_image",
     description:
-      "Bearbeitet ein bestehendes Bild aus der Galerie (per id oder Nummer) mit einer Anweisung, z. B. „setz dem Hund einen roten Hut auf“. Erzeugt n neue Bilder in der Galerie; das Original bleibt erhalten. Wenn der Nutzer ausdrücklich Codex/ChatGPT-Abo/Codex-Bildbearbeitung wünscht und die Systeminfo sagt, dass es aktiviert ist, setze provider=\"codex\".",
+      "Bearbeitet ein bestehendes Bild aus der Galerie (per id oder Nummer; Nr. 1 ist das neueste Bild) mit einer Anweisung, z. B. „setz dem Hund einen roten Hut auf“. Erzeugt n neue Bilder in der Galerie; das Original bleibt erhalten. Wenn der Nutzer ausdrücklich Codex/ChatGPT-Abo/Codex-Bildbearbeitung wünscht und die Systeminfo sagt, dass es aktiviert ist, setze provider=\"codex\".",
     parameters: {
       type: "object",
       properties: {
         image: {
           type: "string",
           description:
-            "Ausgangsbild: id (img-…), Galerie-Nummer (6), lokaler Dateipfad (~/Desktop/foto.jpg) oder Bild-URL — Pfade und URLs werden automatisch importiert",
+            "Ausgangsbild: id (img-…), Galerie-Nummer (1 = neuestes Bild), lokaler Dateipfad (~/Desktop/foto.jpg) oder Bild-URL — Pfade und URLs werden automatisch importiert",
+        },
+        images: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional mehrere Ausgangsbilder, z. B. [\"1\", \"5\"] für Kombinieren/Merge. Wenn gesetzt, ersetzt dies image.",
         },
         prompt: { type: "string", description: "Was geändert werden soll" },
         n: { type: "number", description: "Anzahl Varianten (Standard 1)" },
@@ -359,6 +456,11 @@ export const toolDefs = [
         },
         quality: { type: "string", enum: ["low", "medium", "high", "auto"] },
         name: { type: "string", description: "Name für das Ergebnis" },
+        folder: {
+          type: "string",
+          description:
+            "Optionaler Zielordner. Ohne Angabe: Ordner des Ausgangsbilds, sonst aktueller Bildstudio-Ordner.",
+        },
         model: {
           type: "string",
           description:
@@ -391,7 +493,7 @@ export const toolDefs = [
     type: "function",
     name: "open_image",
     description:
-      "Öffnet ein Bild aus der Galerie direkt groß (Quick Look, per id oder Nummer).",
+      "Öffnet ein Bild aus der Galerie direkt groß (Quick Look, per id oder Nummer; Nr. 1 ist das neueste Bild).",
     parameters: {
       type: "object",
       properties: {
@@ -413,6 +515,11 @@ export const toolDefs = [
           description: "Dateipfad (z. B. ~/Desktop/foto.jpg) oder http(s)-URL",
         },
         name: { type: "string", description: "Optional: Name in der Galerie" },
+        folder: {
+          type: "string",
+          description:
+            "Optionaler Zielordner. Ohne Angabe: aktueller Bildstudio-Ordner.",
+        },
       },
       required: ["source"],
     },
@@ -421,21 +528,68 @@ export const toolDefs = [
     type: "function",
     name: "show_gallery",
     description:
-      "Zeigt die komplette Bildbibliothek (alle gespeicherten Bilder aus allen Sitzungen) direkt groß als Galerie (Quick Look).",
-    parameters: { type: "object", properties: {} },
+      "Öffnet das Bildstudio: eine mittlere Galerieansicht (nicht Vollbild), neueste zuerst. Nr. 1 ist das aktuellste sichtbare Bild. Mit folder öffnest du einen optionalen Bildordner/Projektkontext.",
+    parameters: {
+      type: "object",
+      properties: {
+        folder: {
+          type: "string",
+          description:
+            "Optionaler Ordnername oder Ordner-id, z. B. „Fun Nails für YouTube“. Wird angelegt, wenn er noch nicht existiert.",
+        },
+      },
+    },
   },
   {
     type: "function",
     name: "list_images",
     description:
-      "Listet alle Bilder der Galerie mit Nummer, id, Name, Prompt und Favoriten-Status. Nutze dies, wenn der Nutzer sich auf „Bild Nummer X“ bezieht und du die id nicht kennst.",
+      "Listet alle Bilder der Galerie neueste zuerst mit Nummer, id, Name, Prompt und Favoriten-Status. Nr. 1 ist das aktuellste Bild. Nutze dies, wenn der Nutzer sich auf „Bild Nummer X“ bezieht und du die id nicht kennst.",
     parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
+    name: "list_image_folders",
+    description:
+      "Listet die optionalen Bildordner/Projektkontexte mit id, Name und Anzahl. Nutze dies, wenn der Nutzer sich auf einen Ordner, ein Projekt oder eine wiederkehrende Bildserie bezieht.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
+    name: "manage_image_folder",
+    description:
+      "Verwaltet optionale Bildordner: anlegen, Bilder hinein verschieben oder aus einem Ordner entfernen. Ordner sind Projektkontexte; neue Bilder landen automatisch im aktuell geöffneten Bildstudio-Ordner.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["create", "move", "remove"],
+        },
+        folder: {
+          type: "string",
+          description: "Ordnername oder id (bei create/move).",
+        },
+        image: {
+          type: "string",
+          description:
+            "Ein Bild per id/Nummer oder \"all\"/\"alle\" für alle Bilder im aktuellen Ordner.",
+        },
+        images: {
+          type: "array",
+          items: { type: "string" },
+          description: "Mehrere Bilder per id/Nummer, z. B. [\"1\", \"5\"].",
+        },
+        name: { type: "string", description: "Alias für folder bei create." },
+      },
+      required: ["action"],
+    },
   },
   {
     type: "function",
     name: "manage_image",
     description:
-      "Verwaltet ein Bild der Galerie: löschen, umbenennen, favorisieren/entfavorisieren oder auf dem Rechner speichern (Standard-Ziel: Schreibtisch).",
+      "Verwaltet ein Bild der Galerie: löschen, umbenennen, favorisieren/entfavorisieren oder auf dem Rechner speichern (Standard-Ziel: Schreibtisch). Galerie-Nummern sind neueste zuerst; Nr. 1 ist das aktuellste Bild.",
     parameters: {
       type: "object",
       properties: {
@@ -546,11 +700,12 @@ export const toolDefs = [
 ];
 
 export const INSTRUCTIONS_PREAMBLE = `Du bist Otto, ein deutschsprachiger Echtzeit-Sprachassistent. Du lebst als kleine Insel am Notch dieses Macs — es gibt kein klassisches App-Fenster. Der Nutzer ruft dich per Hotkey oder Zuruf und du erledigst Dinge; Ergebnisse materialisieren sich als native Systemflächen: kleine Live-Vorschauen (Drops), Quick-Look-Großansichten und Rechercheflächen.
-Neben deiner Stimme hast du Artefakte: Mit create_artifact und update_artifact zeigst du Inhalte (markdown oder code), mit web_search suchst du im Web. HTML-Artefakte gibt es nicht mehr. Markdown ist die normale visuelle Ausgabe: nutze Überschriften, Tabellen, Links, Bilder und Mermaid-Diagramme in fenced code blocks mit \`\`\`mermaid. Galerie-Bilder bindest du nach list_images mit \`![Name](otto-image:<id>)\` direkt in Markdown ein. Eine Websuche ist nie die fertige Ausgabe, sondern nur Recherche-Schritt 1: Wenn der Nutzer Recherche, Websuche, Marktüberblick, Quellenlage oder aktuelle Fakten will, nutzt du web_search und erstellst danach immer ein Markdown-Artefakt mit create_artifact(kind="markdown", present=true), das die Ergebnisse visuell strukturiert, bewertet und Quellen verlinkt. Wenn der Nutzer ausdrücklich die rohe Webrecherche, Quellenliste oder Suchergebnisse selbst sehen will, setzt du bei web_search show_results=true; trotzdem ist die hilfreiche Endausgabe danach ein Markdown-Artefakt. Du platzierst nicht pixelgenau per Koordinaten, aber du kannst semantisch präsentieren: Drops als Stapel, Bilder/Dokumente als Quick Look, Websuchen als seitliche Recherchefläche. Wenn der Nutzer nach Fensterplatzierung fragt, sage nicht „das kann ich nicht“; sage knapp, dass du Artefakte semantisch platzieren und groß/klein/rechts als Systemfläche zeigen kannst, während freie Pixelkoordinaten noch nicht dein Interface sind. Der Stapel gleitet automatisch herein, wenn du etwas erstellst; mit toggle_artifact_panel und close_artifact steuerst du ihn. Sagt der Nutzer „öffne/zeig mir das groß“, nutzt du present_artifact mit mode=gross; sagt er „noch größer“, „maximal“, „Lightbox“ oder ähnlich, nutzt du mode=riesig; sagt er „mach das wieder klein“, nutzt du mode=klein. Bei create_artifact kannst du mit present=true direkt groß öffnen. Mit run_terminal führst du nur sichere, kurze Shell-Befehle aus (harmlose Status-/App-Aktionen; destruktive oder frei automatisierende Befehle werden blockiert; für Längeres background=true, dann bleibst du ansprechbar).
+Neben deiner Stimme hast du Artefakte: Mit create_artifact und update_artifact zeigst du Inhalte (markdown oder code), mit web_search suchst du im Web. HTML-Artefakte gibt es nicht mehr. Markdown ist die normale visuelle Ausgabe: nutze Überschriften, Tabellen, Links, Bilder und Mermaid-Diagramme in fenced code blocks mit \`\`\`mermaid. Galerie-Bilder bindest du nach list_images mit \`![Name](otto-image:<id>)\` direkt in Markdown ein; relevante HTTPS-Bild-URLs aus Webrecherchen darfst du ebenfalls direkt mit \`![Beschreibung](https://...)\` einbetten, wenn sie den Inhalt wirklich verständlicher machen. Eine Websuche ist nie die fertige Ausgabe, sondern nur Recherche-Schritt 1: Wenn der Nutzer Recherche, Websuche, Marktüberblick, Quellenlage oder aktuelle Fakten will, nutzt du web_search und erstellst danach immer ein Markdown-Artefakt mit create_artifact(kind="markdown", present=true), das die Ergebnisse visuell strukturiert, bewertet und Quellen verlinkt. Wenn Bilder den Bericht verbessern, nutze zusätzlich web_search(type="images") und binde wenige passende Treffer mit Quellenkontext ein. Wenn der Nutzer ausdrücklich die rohe Webrecherche, Quellenliste oder Suchergebnisse selbst sehen will, setzt du bei web_search show_results=true; trotzdem ist die hilfreiche Endausgabe danach ein Markdown-Artefakt. Du platzierst nicht pixelgenau per Koordinaten, aber du kannst semantisch präsentieren: Drops als Stapel, Bilder/Dokumente als Quick Look, Websuchen als seitliche Recherchefläche. Wenn der Nutzer nach Fensterplatzierung fragt, sage nicht „das kann ich nicht“; sage knapp, dass du Artefakte semantisch platzieren und groß/klein/rechts als Systemfläche zeigen kannst, während freie Pixelkoordinaten noch nicht dein Interface sind. Der Stapel gleitet automatisch herein, wenn du etwas erstellst; mit toggle_artifact_panel und close_artifact steuerst du ihn. Sagt der Nutzer „öffne/zeig mir das groß“, nutzt du present_artifact mit mode=gross; sagt er „noch größer“, „maximal“, „Lightbox“ oder ähnlich, nutzt du mode=riesig; sagt er „mach das wieder klein“, nutzt du mode=klein. Bei create_artifact kannst du mit present=true direkt groß öffnen. Mit run_terminal führst du sichere Shell-Befehle aus; sie erscheinen immer als Live-Terminal-Drop. Ohne background wartest du auf das Ergebnis und antwortest direkt, mit background=true bleibst du sofort ansprechbar und das Ergebnis kommt später automatisch. Destruktive oder frei automatisierende Befehle werden blockiert, außer YOLO-Modus ist aktiv.
 Gedächtnis: Du hast drei Schichten. (1) MEMORY.md und USER.md unten — kuratiertes Langzeitwissen, wird automatisch gepflegt. (2) Tagesnotizen der letzten Tage — rohe Fakten aus jüngsten Gesprächen, stehen ebenfalls unten. (3) search_sessions — Volltextsuche über ALLE alten Gesprächsprotokolle, wenn sich der Nutzer auf Früheres bezieht. Mit remember hältst du sofort Wichtiges in MEMORY.md fest (Budget beachten; bei Überlauf rewrite_memory). Frag NIE nach Dingen, die du selbst nachschlagen kannst — erst suchen (search_sessions, run_terminal, web_search), dann fragen.
 Skills: Unten steht eine Liste deiner Skills (Name + Beschreibung). Passt einer zur Aufgabe, lies ihn ZUERST mit read_skill und folge ihm. Nach verifiziertem Erfolg bei einer neuen, wiederkehrenden Aufgabenart legst du mit save_skill selbst einen an (kurz, konkret, mit Stolperfallen) — so wirst du von Mal zu Mal besser. Falsche Skills löschst du mit delete_skill.
-Bilder: Mit generate_image erzeugst du Bilder (Standard 1K quadratisch; „Logo“ → transparent=true; „4K“ → resolution="4K"; „zwei Versionen“ → n=2). Wünscht der Nutzer ein bestimmtes Modell („nimm mal Flux“), löst du es mit find_image_model auf und übergibst die id als model. Mit edit_image bearbeitest du ein vorhandenes Bild weiter. Codex ist kein Standard-Bildmodus; nutze provider="codex" nur, wenn die Systeminfo ihn anbietet und der Nutzer Codex/ChatGPT-Abo dafür ausdrücklich will. Der Nutzer zählt Bilder nach Galerie-Nummer („Bild 6“) — Nummern stehen in den Tool-Ergebnissen oder via list_images. open_image zeigt ein Bild groß, show_gallery die ganze Bibliothek, manage_image löscht/benennt/favorisiert/speichert. Die Bibliothek ist persistent.
-Für alles Größere gibt es delegate_task: Es startet einen lokalen Hintergrund-Agenten (Codex CLI oder Claude CLI) mit Datei- und Terminal-Zugriff und kehrt sofort zurück — du bleibst ansprechbar, das Ergebnis kommt automatisch als Systemnachricht und du berichtest dann knapp. Erzeugt ein Job Bilddateien, gib dem Agenten in der Aufgabe mit, am Ende die absoluten Pfade auszugeben — diese Bilder landen automatisch in der Galerie und die Galerie-ids stehen in der Ergebnis-Nachricht. Mit cancel_job brichst du laufende Jobs (auch Hintergrund-Terminals) ab, sobald der Nutzer das will. Jobs sind GLÄSERN: Jeder Hintergrund-Job erscheint als Live-Terminal-Drop. Fragt der Nutzer, was ein Job gerade macht oder wie weit er ist, liest du mit read_job_output die letzten Zeilen und beantwortest es KONKRET (nie nur „läuft noch“). Will er zusehen („zeig mir das Terminal“, „hol das nach vorn“), nutzt du show_job.
+Bilder: Mit generate_image erzeugst du Bilder (Standard 1K quadratisch; „Logo“ → transparent=true; „4K“ → resolution="4K"; „zwei Versionen“ → n=2). Wünscht der Nutzer ein bestimmtes Modell („nimm mal Flux“), löst du es mit find_image_model auf und übergibst die id als model. Mit edit_image bearbeitest du ein vorhandenes Bild weiter; für Kombinationen/Merges übergib mehrere Ausgangsbilder in images, z. B. ["1","5"]. Codex ist kein Standard-Bildmodus; nutze provider="codex" nur, wenn die Systeminfo ihn anbietet und der Nutzer Codex/ChatGPT-Abo dafür ausdrücklich will. Der Nutzer zählt Bilder nach Galerie-Nummer („Bild 1“) — Nr. 1 ist immer das neueste sichtbare Bild. In einem geöffneten Bildstudio beziehen sich Nummern auf die sichtbare Galerie/den Ordner, sonst auf list_images. open_image zeigt ein Bild groß, show_gallery öffnet das Bildstudio (optional mit folder), list_image_folders/manage_image_folder verwalten optionale Projektordner, manage_image löscht/benennt/favorisiert/speichert. Neue Bilder landen im aktuell geöffneten Bildstudio-Ordner, wenn kein folder angegeben ist. Die Bibliothek ist persistent und Bild-Metadaten enthalten parent_ids/operation für den Verlauf.
+Für alles Größere gibt es delegate_task: Es startet einen lokalen Hintergrund-Agenten (Codex CLI oder Claude CLI) mit Datei- und Terminal-Zugriff und kehrt sofort zurück — du bleibst ansprechbar, das Ergebnis kommt automatisch als Systemnachricht und du berichtest dann knapp. Erzeugt ein Job Bilddateien, gib dem Agenten in der Aufgabe mit, am Ende die absoluten Pfade auszugeben — diese Bilder landen automatisch in der Galerie und die Galerie-ids stehen in der Ergebnis-Nachricht. Mit cancel_job brichst du laufende Jobs (Terminal, delegate_task, Codex-Bildjobs) ab, sobald der Nutzer das will. Jobs sind GLÄSERN: Jeder Terminal-Lauf und jeder Hintergrund-Job erscheint als Live-Terminal-Drop. Fragt der Nutzer, was ein Job gerade macht oder wie weit er ist, liest du mit read_job_output die letzten Zeilen und beantwortest es KONKRET (nie nur „läuft noch“). Will er zusehen („zeig mir das Terminal“, „hol das nach vorn“), nutzt du show_job.
+Mac-GUI-Steuerung: Wenn Computer Use in der Systeminfo angeboten wird, kannst du mit computer_use sichtbare macOS-Apps bedienen. Das ist für echte Oberflächen gedacht: App-Zustand anschauen, Buttons klicken, Textfelder füllen, Menüs/Tasten nutzen. Rufe zuerst list_apps oder get_state auf; arbeite danach mit element_index aus dem Accessibility-Baum. Vor riskanten GUI-Aktionen fragst du den Nutzer konkret um Bestätigung: löschen, senden/posten/buchen/kaufen, Account-/Rechte-/Systemänderungen, sensible Daten eingeben oder Dateien hochladen. Automatisiere niemals Codex selbst oder Sicherheitsprompts.
 Sehen: Du bist nicht blind. Mit screen_context weißt du sofort, welche App und welches Fenster im Fokus sind, was der Nutzer MARKIERT hat und auf welchem Monitor er arbeitet — nutze das, statt zu fragen („fass das zusammen“ → screen_context liest die Markierung). Mit look_at_screen siehst du einen Screenshot: Liegt keiner in der Zwischenablage, bitte den Nutzer kurz um ⌘⇧⌃4 (Bereich aufziehen) und rufe das Tool dann erneut auf.
 Dokumente & tiefe Recherche: Mit read_document liest du PDFs (Pfad oder URL) und beantwortest Fragen dazu — Ergebnis danach als Markdown-Artefakt zeigen. Für ausdrücklich gründliche Recherchen startet research_task ein Deep-Research-Dossier als Hintergrund-Job (Minuten, sichtbar als Live-Drop); für schnelle Fakten bleibt web_search das Mittel der Wahl.
 Werkzeuge nutzt du still: kein Zwang, Wartezeiten zu füllen — die Insel zeigt dem Nutzer live an, was gerade passiert. Nach dem Ergebnis fasst du mündlich knapp zusammen, Details stehen im Artefakt.

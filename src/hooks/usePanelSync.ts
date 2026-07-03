@@ -9,7 +9,7 @@ import {
 import { emit, listen } from "@tauri-apps/api/event";
 import { hideDrops, showDrops } from "../lib/hudWindow";
 import * as api from "../lib/tauriApi";
-import type { Artifact, ImageState, Settings } from "../lib/types";
+import type { Artifact, ImageFolder, ImageState, Settings } from "../lib/types";
 import type { ImageAction } from "../components/ArtifactContent";
 
 interface UsePanelSyncArgs {
@@ -22,15 +22,19 @@ interface UsePanelSyncArgs {
   artifacts: Artifact[];
   activeArtifactId: string | null;
   images: Record<string, ImageState>;
+  imageFolders: ImageFolder[];
   artifactStyle: string;
   artifactsRef: MutableRefObject<Artifact[]>;
   activeArtifactIdRef: MutableRefObject<string | null>;
   imagesRef: MutableRefObject<Record<string, ImageState>>;
+  imageFoldersRef: MutableRefObject<ImageFolder[]>;
   artifactStyleRef: MutableRefObject<string>;
   setActiveArtifactId: Dispatch<SetStateAction<string | null>>;
   setSettings: Dispatch<SetStateAction<Settings | null>>;
   closeArtifact: (id: string) => boolean;
   handleImageAction: (id: string, action: ImageAction) => Promise<void>;
+  handleOpenImage: (id: string) => void;
+  handleGalleryFolder: (folderId: string | null) => void;
   reloadArtifactStyle: () => void;
 }
 
@@ -60,15 +64,19 @@ export function usePanelSync({
   artifacts,
   activeArtifactId,
   images,
+  imageFolders,
   artifactStyle,
   artifactsRef,
   activeArtifactIdRef,
   imagesRef,
+  imageFoldersRef,
   artifactStyleRef,
   setActiveArtifactId,
   setSettings,
   closeArtifact,
   handleImageAction,
+  handleOpenImage,
+  handleGalleryFolder,
   reloadArtifactStyle,
 }: UsePanelSyncArgs) {
   const panelWasOpen = useRef(false);
@@ -94,9 +102,10 @@ export function usePanelSync({
       artifacts,
       activeId: activeArtifactId,
       images: visibleImages(artifacts, images),
+      imageFolders,
       artifactStyle,
     });
-  }, [artifacts, activeArtifactId, images, artifactStyle]);
+  }, [artifacts, activeArtifactId, images, imageFolders, artifactStyle]);
 
   useEffect(() => {
     const unReady = listen("panel-ready", () => {
@@ -104,14 +113,16 @@ export function usePanelSync({
         artifacts: artifactsRef.current,
         activeId: activeArtifactIdRef.current,
         images: visibleImages(artifactsRef.current, imagesRef.current),
+        imageFolders: imageFoldersRef.current,
         artifactStyle: artifactStyleRef.current,
       });
     });
     const unClose = listen("panel-close", () => setPanelOpen(false));
     const unAction = listen<{
-      type: "select" | "close" | "image";
+      type: "select" | "close" | "image" | "open-image" | "gallery-folder";
       id?: string;
       action?: "favorite" | "delete" | "save";
+      folderId?: string | null;
     }>("panel-action", (e) => {
       const p = e.payload;
       if (p.type === "select" && p.id) {
@@ -120,6 +131,10 @@ export function usePanelSync({
         closeArtifact(p.id);
       } else if (p.type === "image" && p.id && p.action) {
         void handleImageAction(p.id, p.action);
+      } else if (p.type === "open-image" && p.id) {
+        handleOpenImage(p.id);
+      } else if (p.type === "gallery-folder") {
+        handleGalleryFolder(p.folderId ?? null);
       }
     });
     const unStyle = listen("style-changed", () => reloadArtifactStyle());
@@ -140,12 +155,15 @@ export function usePanelSync({
     artifactsRef,
     activeArtifactIdRef,
     imagesRef,
+    imageFoldersRef,
     artifactStyleRef,
     setPanelOpen,
     setActiveArtifactId,
     setSettings,
     closeArtifact,
     handleImageAction,
+    handleOpenImage,
+    handleGalleryFolder,
     reloadArtifactStyle,
   ]);
 

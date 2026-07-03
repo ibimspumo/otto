@@ -396,7 +396,7 @@ const JOB_STATUS_LABEL: Record<string, string> = {
 };
 
 /**
- * Gläserner Job: das Live-Terminal eines Hintergrund-Jobs in voller
+ * Gläserner Job: das Live-Terminal eines Jobs in voller
  * Größe — Scrollback klebt am Ende, solange der Nutzer nicht selbst
  * hochgescrollt hat.
  */
