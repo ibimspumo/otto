@@ -101,6 +101,7 @@ pub fn run() {
             context::clipboard_image,
             context::file_read_b64,
             cli::cli_job_start,
+            cli::codex_image_job_start,
             cli::cli_job_cancel,
             cli::cli_available,
             wake::wake_word_start,

@@ -75,6 +75,12 @@ export const imageImport = (source: string, name?: string, newerThanMs?: number)
 export const cliJobStart = (agent: string, task: string, cwd?: string) =>
   invoke<string>("cli_job_start", { agent, task, cwd });
 
+export const codexImageJobStart = (
+  task: string,
+  imagePaths: string[] = [],
+  cwd?: string,
+) => invoke<string>("codex_image_job_start", { task, imagePaths, cwd });
+
 export const cliJobCancel = (jobId: string) =>
   invoke<string[]>("cli_job_cancel", { jobId });
 

@@ -67,6 +67,69 @@ function aspectFromSize(size: string): Aspect {
   return "portrait";
 }
 
+function extractCodexAgentImagePaths(text: string, max = 12): string[] {
+  const agentMessages: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line.startsWith("{")) continue;
+    try {
+      const evt = JSON.parse(line) as {
+        type?: string;
+        item?: { type?: string; text?: string };
+      };
+      if (evt.type === "item.completed" && evt.item?.type === "agent_message") {
+        agentMessages.push(evt.item.text ?? "");
+      }
+    } catch {
+      // Codex --json kann Warnzeilen zwischen JSONL-Events mischen.
+    }
+  }
+  const fromMessages = extractImagePaths(agentMessages.join("\n"), max);
+  return fromMessages.length > 0 ? fromMessages : extractImagePaths(text, max);
+}
+
+function buildCodexImageTask(opts: {
+  mode: "generate" | "edit";
+  prompt: string;
+  n: number;
+  baseName: string;
+  aspect?: Aspect;
+  resolution?: Resolution;
+  quality?: Quality;
+  transparent?: boolean;
+}): string {
+  const count = Math.max(1, Math.min(8, opts.n || 1));
+  const names = Array.from({ length: count }, (_, i) =>
+    count > 1
+      ? `otto-codex-image-${Date.now()}-${i + 1}.png`
+      : `otto-codex-image-${Date.now()}.png`,
+  );
+  const lines = [
+    "$imagegen",
+    opts.mode === "edit"
+      ? "Bearbeite das angehängte Ausgangsbild. Erhalte erkennbare Motivteile, sofern der Prompt nichts anderes verlangt."
+      : "Erzeuge neue Bilddateien.",
+    `Prompt: ${opts.prompt}`,
+    `Anzahl finaler Bilder: ${count}`,
+    `Galerie-Name: ${opts.baseName}`,
+    `Seitenverhältnis: ${opts.aspect ?? "square"}`,
+    `Zielauflösung: ${opts.resolution ?? "1K"}`,
+    `Qualität: ${opts.quality ?? "auto"}`,
+  ];
+  if (opts.transparent) {
+    lines.push(
+      "Transparenz gewünscht: Nutze den eingebauten Standardpfad; falls native Transparenz nicht möglich ist, nutze einen sauber entfernbaren Chroma-Key und prüfe das Ergebnis.",
+    );
+  }
+  lines.push(
+    `Lege die final ausgewählten Dateien im aktuellen Arbeitsordner mit diesen Namen ab: ${names.join(", ")}.`,
+    "Falls Codex die Bilder zuerst unter $CODEX_HOME/generated_images erzeugt, suche die neuen Dateien dort und kopiere nur die finalen Ausgaben in den Arbeitsordner.",
+    "Prüfe danach, dass jede finale Datei existiert und ein echtes PNG/JPEG/WebP-Bild ist.",
+    "Antworte am Ende ausschließlich mit den absoluten Dateipfaden der finalen Dateien, eine Zeile pro Datei. Keine Erklärungen.",
+  );
+  return lines.join("\n");
+}
+
 export default function App() {
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -573,9 +636,14 @@ export default function App() {
       // Galerie: Pfade aus der Ausgabe fischen und importieren. Der mtime-
       // Guard (Job-Start minus Slack) hält bloß erwähnte Alt-Bilder draußen.
       let galleryNote = "";
-      if (!failed && (p.agent === "codex" || p.agent === "claude")) {
+      if (!failed && (p.agent === "codex" || p.agent === "claude" || p.agent === "codex-image")) {
         const imported: string[] = [];
-        for (const path of extractImagePaths(p.output)) {
+        const importedIds: string[] = [];
+        const paths =
+          p.agent === "codex-image"
+            ? extractCodexAgentImagePaths(p.output)
+            : extractImagePaths(p.output);
+        for (const path of paths) {
           try {
             const meta = await api.imageImport(
               path,
@@ -588,6 +656,7 @@ export default function App() {
               meta,
             });
             imported.push(`${meta.name} (id ${meta.id})`);
+            importedIds.push(meta.id);
           } catch (err) {
             void api.logLine(`auto-import übersprungen (${path}): ${String(err)}`);
           }
@@ -601,6 +670,12 @@ export default function App() {
           galleryNote =
             `\nDie erzeugten Bilder wurden automatisch in die Galerie importiert: ` +
             `${imported.join(", ")}. Zeig sie dem Nutzer mit open_image (einzeln) oder show_gallery.`;
+          addArtifact({
+            title: imported.length === 1 ? "Codex-Bild" : "Codex-Bilder",
+            kind: "image",
+            content: p.task,
+            imageIds: importedIds,
+          });
         }
       }
       const message =
@@ -620,7 +695,7 @@ export default function App() {
     return () => {
       un.then((f) => f());
     };
-  }, [commitJobs, patchJobArtifact, pushActivity, requestResponse, setImage]);
+  }, [addArtifact, commitJobs, patchJobArtifact, pushActivity, requestResponse, setImage]);
 
   const closeArtifact = useCallback(
     (id: string): boolean => {
@@ -1177,6 +1252,84 @@ export default function App() {
           case "generate_image": {
             const s = settingsRefValue.current;
             const transparentWanted = Boolean(args.transparent);
+            const provider =
+              String(args.provider ?? "").trim().toLowerCase() === "codex" ||
+              String(args.model ?? "").trim().toLowerCase() === "codex"
+                ? "codex"
+                : "api";
+            const prompt = String(args.prompt ?? "");
+            const n = Math.max(1, Math.min(8, Number(args.n) || 1));
+            const aspect = (
+              ["square", "landscape", "portrait", "wide"].includes(args.aspect)
+                ? args.aspect
+                : "square"
+            ) as Aspect;
+            const resolution = (
+              ["1K", "2K", "4K"].includes(args.resolution) ? args.resolution : "1K"
+            ) as Resolution;
+            const quality = (
+              ["low", "medium", "high", "auto"].includes(args.quality)
+                ? args.quality
+                : "auto"
+            ) as Quality;
+            const baseName =
+              String(args.name ?? "").trim() || prompt.slice(0, 32) || "Bild";
+            if (provider === "codex") {
+              if (!s?.codex_imagegen_enabled) {
+                out = {
+                  ok: false,
+                  error:
+                    "Codex-Bildmodus ist in den Einstellungen deaktiviert. Nutze den normalen Bildmodus oder aktiviere ihn unter Bilder.",
+                };
+                break;
+              }
+              if (!s?.cli_enabled) {
+                out = {
+                  ok: false,
+                  error:
+                    "CLI-Delegation ist deaktiviert; Codex-Bildmodus braucht Codex CLI.",
+                };
+                break;
+              }
+              try {
+                const avail = await api.cliAvailable();
+                if (!avail.codex) {
+                  out = { ok: false, error: "Codex CLI ist nicht installiert." };
+                  break;
+                }
+                const task = buildCodexImageTask({
+                  mode: "generate",
+                  prompt,
+                  n,
+                  baseName,
+                  aspect,
+                  resolution,
+                  quality,
+                  transparent: transparentWanted,
+                });
+                const startedAt = Date.now();
+                const jobId = await api.codexImageJobStart(task);
+                commitJobs([
+                  ...jobsRef.current,
+                  { id: jobId, agent: "codex-image", task, startedAt },
+                ]);
+                addJobArtifact(jobId, "codex-image", task);
+                pushActivity(
+                  `Codex erzeugt ${n > 1 ? `${n} Bilder` : "ein Bild"}: „${prompt.slice(0, 48)}“`,
+                );
+                out = {
+                  ok: true,
+                  provider: "codex",
+                  job_id: jobId,
+                  status: "gestartet",
+                  hinweis:
+                    "Codex-Bildgenerierung läuft als sichtbarer Hintergrund-Job. Die finalen Dateien werden nach Abschluss automatisch in die Galerie importiert und als Bild-Drop gezeigt.",
+                };
+              } catch (e) {
+                out = { ok: false, error: String(e) };
+              }
+              break;
+            }
             // Transparenz beherrscht nur gpt-image-1 → bei Bedarf umschalten.
             let model =
               String(args.model ?? "").trim() ||
@@ -1201,24 +1354,7 @@ export default function App() {
               };
               break;
             }
-            const prompt = String(args.prompt ?? "");
-            const n = Math.max(1, Math.min(8, Number(args.n) || 1));
-            const aspect = (
-              ["square", "landscape", "portrait", "wide"].includes(args.aspect)
-                ? args.aspect
-                : "square"
-            ) as Aspect;
-            const resolution = (
-              ["1K", "2K", "4K"].includes(args.resolution) ? args.resolution : "1K"
-            ) as Resolution;
-            const quality = (
-              ["low", "medium", "high", "auto"].includes(args.quality)
-                ? args.quality
-                : "auto"
-            ) as Quality;
             const transparent = transparentWanted && model === "gpt-image-1";
-            const baseName =
-              String(args.name ?? "").trim() || prompt.slice(0, 32) || "Bild";
             pushActivity(
               `generiert ${n > 1 ? `${n} Bilder` : "ein Bild"}: „${prompt.slice(0, 48)}“`,
             );
@@ -1317,6 +1453,93 @@ export default function App() {
           }
           case "edit_image": {
             const s = settingsRefValue.current;
+            const provider =
+              String(args.provider ?? "").trim().toLowerCase() === "codex" ||
+              String(args.model ?? "").trim().toLowerCase() === "codex"
+                ? "codex"
+                : "api";
+            const base = await resolveImageRef(String(args.image ?? ""));
+            if (!base) {
+              out = {
+                ok: false,
+                error: `Bild „${args.image}“ nicht gefunden. Nutze list_images.`,
+              };
+              break;
+            }
+            const prompt = String(args.prompt ?? "");
+            const n = Math.max(1, Math.min(8, Number(args.n) || 1));
+            const quality = (
+              ["low", "medium", "high", "auto"].includes(args.quality)
+                ? args.quality
+                : "auto"
+            ) as Quality;
+            const editAspect = (
+              ["square", "landscape", "portrait", "wide"].includes(args.aspect)
+                ? args.aspect
+                : aspectFromSize(base.size)
+            ) as Aspect;
+            let size: string | undefined;
+            if (["1K", "2K", "4K"].includes(args.resolution)) {
+              size = resolveSize(editAspect, args.resolution as Resolution);
+            }
+            const baseName =
+              String(args.name ?? "").trim() || `${base.name} (bearbeitet)`;
+            if (provider === "codex") {
+              if (!s?.codex_imagegen_enabled) {
+                out = {
+                  ok: false,
+                  error:
+                    "Codex-Bildmodus ist in den Einstellungen deaktiviert. Nutze den normalen Bildmodus oder aktiviere ihn unter Bilder.",
+                };
+                break;
+              }
+              if (!s?.cli_enabled) {
+                out = {
+                  ok: false,
+                  error:
+                    "CLI-Delegation ist deaktiviert; Codex-Bildmodus braucht Codex CLI.",
+                };
+                break;
+              }
+              try {
+                const avail = await api.cliAvailable();
+                if (!avail.codex) {
+                  out = { ok: false, error: "Codex CLI ist nicht installiert." };
+                  break;
+                }
+                const task = buildCodexImageTask({
+                  mode: "edit",
+                  prompt,
+                  n,
+                  baseName,
+                  aspect: editAspect,
+                  resolution: (["1K", "2K", "4K"].includes(args.resolution)
+                    ? args.resolution
+                    : "1K") as Resolution,
+                  quality,
+                });
+                const startedAt = Date.now();
+                const jobId = await api.codexImageJobStart(task, [base.path]);
+                commitJobs([
+                  ...jobsRef.current,
+                  { id: jobId, agent: "codex-image", task, startedAt },
+                ]);
+                addJobArtifact(jobId, "codex-image", task);
+                pushActivity(`Codex bearbeitet „${base.name}“: ${prompt.slice(0, 48)}`);
+                out = {
+                  ok: true,
+                  provider: "codex",
+                  basis: base.id,
+                  job_id: jobId,
+                  status: "gestartet",
+                  hinweis:
+                    "Codex-Bildbearbeitung läuft als sichtbarer Hintergrund-Job. Die finalen Dateien werden nach Abschluss automatisch in die Galerie importiert und als Bild-Drop gezeigt.",
+                };
+              } catch (e) {
+                out = { ok: false, error: String(e) };
+              }
+              break;
+            }
             const model =
               String(args.model ?? "").trim() ||
               s?.image_model?.trim() ||
@@ -1334,32 +1557,6 @@ export default function App() {
               };
               break;
             }
-            const base = await resolveImageRef(String(args.image ?? ""));
-            if (!base) {
-              out = {
-                ok: false,
-                error: `Bild „${args.image}“ nicht gefunden. Nutze list_images.`,
-              };
-              break;
-            }
-            const prompt = String(args.prompt ?? "");
-            const n = Math.max(1, Math.min(8, Number(args.n) || 1));
-            const quality = (
-              ["low", "medium", "high", "auto"].includes(args.quality)
-                ? args.quality
-                : "auto"
-            ) as Quality;
-            let size: string | undefined;
-            if (["1K", "2K", "4K"].includes(args.resolution)) {
-              const aspect = (
-                ["square", "landscape", "portrait", "wide"].includes(args.aspect)
-                  ? args.aspect
-                  : aspectFromSize(base.size)
-              ) as Aspect;
-              size = resolveSize(aspect, args.resolution as Resolution);
-            }
-            const baseName =
-              String(args.name ?? "").trim() || `${base.name} (bearbeitet)`;
             pushActivity(`bearbeitet „${base.name}“: ${prompt.slice(0, 48)}`);
 
             const ids = Array.from({ length: n }, () => newImageId());
@@ -1375,11 +1572,6 @@ export default function App() {
 
             try {
               const baseB64 = await api.imageReadB64(base.id);
-              const editAspect = (
-                ["square", "landscape", "portrait", "wide"].includes(args.aspect)
-                  ? args.aspect
-                  : aspectFromSize(base.size)
-              ) as Aspect;
               const editedB64s = useOpenAi
                 ? await editImages(key, [baseB64], {
                     prompt,
@@ -1934,6 +2126,10 @@ export default function App() {
           cliInfo =
             `\n\n--- Delegation (delegate_task) ---\nHintergrund-Agenten auf diesem Mac: ${status}. ` +
             `Standard-Agent: ${current.cli_default?.trim() || "codex"}.`;
+          if (current.codex_imagegen_enabled && avail.codex) {
+            cliInfo +=
+              "\nCodex-Bildmodus ist aktiviert, aber NICHT Standard: Nutze generate_image/edit_image mit provider=\"codex\" nur, wenn der Nutzer Codex, das ChatGPT-Abo oder Codex-Bildgenerierung ausdrücklich dafür wünscht. Ergebnisse laufen als Hintergrund-Job und werden danach automatisch in die Galerie importiert.";
+          }
           if (current.cli_notes?.trim()) {
             cliInfo += `\nHinweise des Nutzers zur Wahl des Agenten: ${current.cli_notes.trim()}`;
           }

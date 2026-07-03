@@ -4,6 +4,7 @@
 // wird in lib.rs gesetzt). Linksklick aufs Icon toggelt den Orb; das
 // Menü (Rechtsklick) bietet Öffnen, Einstellungen und Beenden. Alle
 // Aktionen laufen als Events ins Frontend — dort lebt die Fensterlogik.
+// Linksklick öffnet die Einstellungen; die Insel bleibt Hotkey/Wake/menügesteuert.
 
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -96,7 +97,7 @@ pub fn setup(app: &tauri::AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                let _ = tray.app_handle().emit("tray-toggle", ());
+                let _ = tray.app_handle().emit("tray-settings", ());
             }
         })
         .build(app)?;

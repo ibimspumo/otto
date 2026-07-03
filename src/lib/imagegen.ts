@@ -272,9 +272,10 @@ export async function generateImagesOpenRouter(
     output_format: "png",
   };
   if (opts.inputRefsB64?.length) {
-    body.input_references = opts.inputRefsB64.map(
-      (b64) => `data:image/png;base64,${b64}`,
-    );
+    body.input_references = opts.inputRefsB64.map((b64) => ({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${b64}` },
+    }));
   }
 
   const resp = await fetch("https://openrouter.ai/api/v1/images", {

@@ -255,10 +255,12 @@ export function ImageSettings({
   imageModels,
   modelFilter,
   setModelFilter,
+  cliStatus,
 }: SectionProps & {
   imageModels: ImageModelInfo[];
   modelFilter: string;
   setModelFilter: (value: string) => void;
+  cliStatus: { codex: boolean; claude: boolean } | null;
 }) {
   const f = modelFilter.trim().toLowerCase();
   const filtered = f
@@ -297,6 +299,24 @@ export function ImageSettings({
             ))}
           </select>
         </span>
+      </Row>
+      <Row
+        label="Codex-Bildmodus"
+        hint={
+          <>
+            Option für Bildwünsche über Codex CLI und dein ChatGPT/Codex-Abo.
+            Otto nutzt ihn nur, wenn du ihn per Stimme ausdrücklich wählst.{" "}
+            {cliStatus
+              ? `Codex CLI ${cliStatus.codex ? "gefunden" : "nicht gefunden"}.`
+              : ""}
+          </>
+        }
+      >
+        <Switch
+          label="Codex-Bildmodus anbieten"
+          checked={form.codex_imagegen_enabled}
+          onChange={(v) => set({ codex_imagegen_enabled: v })}
+        />
       </Row>
     </Group>
   );

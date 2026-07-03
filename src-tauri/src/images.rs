@@ -80,6 +80,32 @@ fn with_paths(dir: &PathBuf, mut index: Vec<ImageMeta>) -> Vec<ImageMeta> {
     index
 }
 
+fn image_ext(bytes: &[u8]) -> Result<&'static str, String> {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        return Ok("png");
+    }
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Ok("jpg");
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Ok("webp");
+    }
+    if bytes.len() >= 12 {
+        let brand = &bytes[4..12];
+        if brand == b"ftypheic"
+            || brand == b"ftypheix"
+            || brand == b"ftyphevc"
+            || brand == b"ftyphevx"
+        {
+            return Ok("heic");
+        }
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Ok("gif");
+    }
+    Err("Die empfangenen Daten sind kein unterstütztes Bildformat.".into())
+}
+
 fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
@@ -146,7 +172,8 @@ fn store_bytes(
     size: &str,
 ) -> Result<ImageMeta, String> {
     let dir = images_dir(app)?;
-    let file = format!("{id}.png");
+    let ext = image_ext(bytes)?;
+    let file = format!("{id}.{ext}");
     let image_path = dir.join(&file);
     fs::write(&image_path, bytes).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -437,10 +464,16 @@ pub fn image_export(
     };
 
     let base = sanitize_filename(&meta.name);
-    let mut target = dest_dir.join(format!("{base}.png"));
+    let ext = PathBuf::from(&meta.file)
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.trim().is_empty())
+        .unwrap_or("png")
+        .to_string();
+    let mut target = dest_dir.join(format!("{base}.{ext}"));
     let mut counter = 2;
     while target.exists() {
-        target = dest_dir.join(format!("{base}-{counter}.png"));
+        target = dest_dir.join(format!("{base}-{counter}.{ext}"));
         counter += 1;
     }
     fs::copy(dir.join(&meta.file), &target).map_err(|e| e.to_string())?;

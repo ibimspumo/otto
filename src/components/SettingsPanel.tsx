@@ -192,6 +192,7 @@ export default function SettingsPanel({
             imageModels={imageModels}
             modelFilter={modelFilter}
             setModelFilter={setModelFilter}
+            cliStatus={cliStatus}
           />
         );
       case "gedaechtnis":

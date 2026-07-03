@@ -94,50 +94,13 @@ pub fn kill_all_jobs() {
     }
 }
 
-#[tauri::command]
-pub fn cli_job_start(
+fn start_job(
     app: tauri::AppHandle,
     agent: String,
     task: String,
-    cwd: Option<String>,
+    dir: String,
+    cmdline: String,
 ) -> Result<String, String> {
-    let task = task.trim().to_string();
-    if task.is_empty() {
-        return Err("Leere Aufgabe.".into());
-    }
-    // YOLO-Modus: die CLI-Agenten bekommen vollen System-/Netzzugriff,
-    // der Hintergrund-Shell-Job läuft ohne Befehls-Filter.
-    let yolo = crate::settings::yolo_enabled(&app);
-    let cmdline = match agent.as_str() {
-        "codex" => {
-            let sandbox = if yolo { "danger-full-access" } else { "workspace-write" };
-            format!(
-                "{CLI_PATH_SETUP}codex exec -s {sandbox} --skip-git-repo-check {}",
-                shell_quote(&task)
-            )
-        }
-        "claude" => {
-            let perm = if yolo {
-                "--dangerously-skip-permissions"
-            } else {
-                "--permission-mode acceptEdits"
-            };
-            format!("{CLI_PATH_SETUP}claude -p {} {perm}", shell_quote(&task))
-        }
-        // Hintergrund-Terminal: task IST der Shell-Befehl. Gleiche
-        // Infrastruktur wie die CLI-Agenten (Streaming, Cancel, Watchdog).
-        "shell" => {
-            if !yolo {
-                crate::shell_safety::validate_shell_command(&task)?;
-            }
-            format!("{CLI_PATH_SETUP}{task}")
-        }
-        other => return Err(format!("Unbekannter Agent: {other} (codex, claude oder shell)")),
-    };
-    let dir = cwd
-        .map(|d| expand_tilde(d.trim()))
-        .filter(|d| !d.is_empty())
-        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into()));
     if !std::path::Path::new(&dir).is_dir() {
         return Err(format!("Arbeitsverzeichnis existiert nicht: {dir}"));
     }
@@ -248,6 +211,102 @@ pub fn cli_job_start(
     }
 
     Ok(job_id)
+}
+
+#[tauri::command]
+pub fn cli_job_start(
+    app: tauri::AppHandle,
+    agent: String,
+    task: String,
+    cwd: Option<String>,
+) -> Result<String, String> {
+    let task = task.trim().to_string();
+    if task.is_empty() {
+        return Err("Leere Aufgabe.".into());
+    }
+    // YOLO-Modus: die CLI-Agenten bekommen vollen System-/Netzzugriff,
+    // der Hintergrund-Shell-Job läuft ohne Befehls-Filter.
+    let yolo = crate::settings::yolo_enabled(&app);
+    let cmdline = match agent.as_str() {
+        "codex" => {
+            let sandbox = if yolo { "danger-full-access" } else { "workspace-write" };
+            format!(
+                "{CLI_PATH_SETUP}codex exec -s {sandbox} --skip-git-repo-check {}",
+                shell_quote(&task)
+            )
+        }
+        "claude" => {
+            let perm = if yolo {
+                "--dangerously-skip-permissions"
+            } else {
+                "--permission-mode acceptEdits"
+            };
+            format!("{CLI_PATH_SETUP}claude -p {} {perm}", shell_quote(&task))
+        }
+        // Hintergrund-Terminal: task IST der Shell-Befehl. Gleiche
+        // Infrastruktur wie die CLI-Agenten (Streaming, Cancel, Watchdog).
+        "shell" => {
+            if !yolo {
+                crate::shell_safety::validate_shell_command(&task)?;
+            }
+            format!("{CLI_PATH_SETUP}{task}")
+        }
+        other => return Err(format!("Unbekannter Agent: {other} (codex, claude oder shell)")),
+    };
+    let dir = cwd
+        .map(|d| expand_tilde(d.trim()))
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".into()));
+    start_job(app, agent, task, dir, cmdline)
+}
+
+/// Spezialpfad für Codex' eingebaute imagegen-Skill. Er benutzt `--image … --`
+/// als echte CLI-Argumentgrenze; sonst kann ein Bildpfad den Prompt schlucken.
+#[tauri::command]
+pub fn codex_image_job_start(
+    app: tauri::AppHandle,
+    task: String,
+    image_paths: Vec<String>,
+    cwd: Option<String>,
+) -> Result<String, String> {
+    let task = task.trim().to_string();
+    if task.is_empty() {
+        return Err("Leere Aufgabe.".into());
+    }
+    let dir = if let Some(cwd) = cwd.map(|d| expand_tilde(d.trim())).filter(|d| !d.is_empty()) {
+        cwd
+    } else {
+        let dir = std::env::temp_dir().join("otto-codex-imagegen");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Arbeitsordner fehlt: {e}"))?;
+        dir.to_string_lossy().to_string()
+    };
+    let mut images = Vec::new();
+    for raw in image_paths {
+        let path = expand_tilde(raw.trim());
+        if path.is_empty() {
+            continue;
+        }
+        if !std::path::Path::new(&path).is_file() {
+            return Err(format!("Bilddatei existiert nicht: {path}"));
+        }
+        images.push(path);
+    }
+    let yolo = crate::settings::yolo_enabled(&app);
+    let sandbox = if yolo { "danger-full-access" } else { "workspace-write" };
+    let mut cmdline = format!(
+        "{CLI_PATH_SETUP}codex exec --json --ephemeral --ignore-rules -s {sandbox} --skip-git-repo-check -C {} ",
+        shell_quote(&dir)
+    );
+    if !images.is_empty() {
+        cmdline.push_str("--image ");
+        for image in &images {
+            cmdline.push_str(&shell_quote(image));
+            cmdline.push(' ');
+        }
+    }
+    cmdline.push_str("-- ");
+    cmdline.push_str(&shell_quote(&task));
+    start_job(app, "codex-image".into(), task, dir, cmdline)
 }
 
 #[tauri::command]
