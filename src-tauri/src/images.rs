@@ -196,11 +196,15 @@ pub fn image_store(
 /// Importiert ein Bild in die Galerie — von einem lokalen Pfad (auch ~/…)
 /// oder einer http(s)-URL. Wird auf max. 2048 px Kante komprimiert (PNG,
 /// Alpha bleibt erhalten), damit es als KI-Referenz taugt.
+/// `newer_than_ms` (nur lokale Pfade): Datei muss jünger sein als dieser
+/// Zeitstempel — Guard für den Auto-Import aus CLI-Jobs, damit nicht jedes
+/// in der Ausgabe bloß erwähnte Alt-Bild in der Galerie landet.
 #[tauri::command]
 pub async fn image_import(
     app: tauri::AppHandle,
     source: String,
     name: Option<String>,
+    newer_than_ms: Option<u64>,
 ) -> Result<ImageMeta, String> {
     let src = source.trim().to_string();
 
@@ -241,6 +245,17 @@ pub async fn image_import(
         let p = PathBuf::from(&expanded);
         if !p.is_file() {
             return Err(format!("Datei nicht gefunden: {expanded}"));
+        }
+        if let Some(min_ms) = newer_than_ms {
+            let modified_ms = fs::metadata(&p)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            if modified_ms < min_ms {
+                return Err(format!("Datei ist älter als der Job: {expanded}"));
+            }
         }
         fs::read(&p).map_err(|e| e.to_string())?
     };

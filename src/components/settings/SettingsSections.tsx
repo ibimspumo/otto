@@ -512,6 +512,28 @@ export function CapabilitySettings({
           />
         </Row>
       </Group>
+      <Group title="Voller Systemzugriff">
+        <Row
+          label="YOLO-Modus"
+          hint={
+            <>
+              <strong>Achtung:</strong> Hebt alle Sicherheitsschranken auf. Terminal
+              und Delegation laufen dann mit den vollen Rechten deines Benutzers —
+              wie ein normales Terminal: destruktive Befehle, Downloads,
+              Datei-Umleitungen, Prozess-Steuerung, alles erlaubt. Codex bekommt
+              vollen Datei- und Netzzugriff, Claude läuft ohne Rückfragen. Echtes
+              root gibt es nur mit sudo-Passwort. Nur einschalten, wenn du Otto
+              vollständig vertraust.
+            </>
+          }
+        >
+          <Switch
+            label="YOLO-Modus erlauben"
+            checked={form.yolo_mode}
+            onChange={(v) => set({ yolo_mode: v })}
+          />
+        </Row>
+      </Group>
     </>
   );
 }

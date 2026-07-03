@@ -95,19 +95,31 @@ pub fn cli_job_start(
     if task.is_empty() {
         return Err("Leere Aufgabe.".into());
     }
+    // YOLO-Modus: die CLI-Agenten bekommen vollen System-/Netzzugriff,
+    // der Hintergrund-Shell-Job läuft ohne Befehls-Filter.
+    let yolo = crate::settings::yolo_enabled(&app);
     let cmdline = match agent.as_str() {
-        "codex" => format!(
-            "{CLI_PATH_SETUP}codex exec -s workspace-write --skip-git-repo-check {}",
-            shell_quote(&task)
-        ),
-        "claude" => format!(
-            "{CLI_PATH_SETUP}claude -p {} --permission-mode acceptEdits",
-            shell_quote(&task)
-        ),
+        "codex" => {
+            let sandbox = if yolo { "danger-full-access" } else { "workspace-write" };
+            format!(
+                "{CLI_PATH_SETUP}codex exec -s {sandbox} --skip-git-repo-check {}",
+                shell_quote(&task)
+            )
+        }
+        "claude" => {
+            let perm = if yolo {
+                "--dangerously-skip-permissions"
+            } else {
+                "--permission-mode acceptEdits"
+            };
+            format!("{CLI_PATH_SETUP}claude -p {} {perm}", shell_quote(&task))
+        }
         // Hintergrund-Terminal: task IST der Shell-Befehl. Gleiche
         // Infrastruktur wie die CLI-Agenten (Streaming, Cancel, Watchdog).
         "shell" => {
-            crate::shell_safety::validate_shell_command(&task)?;
+            if !yolo {
+                crate::shell_safety::validate_shell_command(&task)?;
+            }
             format!("{CLI_PATH_SETUP}{task}")
         }
         other => return Err(format!("Unbekannter Agent: {other} (codex, claude oder shell)")),

@@ -23,6 +23,12 @@ pub struct Settings {
     pub cli_enabled: bool,
     pub cli_default: String,
     pub cli_notes: String,
+    /// „YOLO-Modus": hebt ALLE Sicherheitsschranken für Terminal und
+    /// Delegation auf — `run_terminal`/`shell` laufen ohne Befehls-Filter,
+    /// Codex mit `danger-full-access`, Claude mit
+    /// `--dangerously-skip-permissions`. Voller Systemzugriff als der
+    /// angemeldete Nutzer (kein Root ohne sudo-Passwort). Bewusst opt-in.
+    pub yolo_mode: bool,
     pub memory_enabled: bool,
     pub memory_model: String,
     pub session_retention_days: u32,
@@ -49,6 +55,7 @@ impl Default for Settings {
             cli_enabled: true,
             cli_default: "codex".into(),
             cli_notes: String::new(),
+            yolo_mode: false,
             memory_enabled: true,
             memory_model: "gpt-5-mini".into(),
             session_retention_days: 30,
@@ -61,6 +68,20 @@ fn config_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("settings.json"))
+}
+
+/// Liest allein das `yolo_mode`-Flag aus settings.json (ohne Keychain-
+/// Nebenwirkungen). Einzige Wahrheitsquelle für den Bypass der Terminal-/
+/// Delegations-Schranken — so kann kein Frontend-Bug den YOLO-Modus
+/// aktivieren, ohne dass er wirklich gespeichert wurde. Fehlt die Datei
+/// oder das Feld, gilt `false`.
+pub fn yolo_enabled(app: &tauri::AppHandle) -> bool {
+    config_file(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str::<Settings>(&raw).ok())
+        .map(|s| s.yolo_mode)
+        .unwrap_or(false)
 }
 
 #[cfg(target_os = "macos")]

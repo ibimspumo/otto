@@ -22,6 +22,7 @@ export interface Settings {
   cli_enabled: boolean;
   cli_default: string;
   cli_notes: string;
+  yolo_mode: boolean;
   memory_enabled: boolean;
   memory_model: string;
   session_retention_days: number;
@@ -70,6 +71,8 @@ export interface CliJob {
   id: string;
   agent: string;
   task: string;
+  /** Startzeit (ms) — mtime-Guard für den Bild-Auto-Import nach Job-Ende. */
+  startedAt?: number;
 }
 
 export type ArtifactKind = "markdown" | "code" | "html" | "search" | "image";

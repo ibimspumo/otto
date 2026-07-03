@@ -34,6 +34,26 @@ import Island from "./components/Island";
 import { useActivation } from "./hooks/useActivation";
 import { usePanelSync } from "./hooks/usePanelSync";
 
+/**
+ * Fischt Bilddatei-Pfade aus der Ausgabe eines CLI-Jobs — Basis für den
+ * Auto-Import erzeugter Bilder in die Galerie. Erkennt Pfade als eigene
+ * Zeile (auch mit Leerzeichen im Namen) und Pfade mitten im Fließtext.
+ */
+function extractImagePaths(text: string, max = 12): string[] {
+  const lineRe = /^(?:~\/|\/)[^"'`]*\.(?:png|jpe?g|webp|gif|heic)$/i;
+  const inlineRe = /(?:~\/|\/)[^\s"'`()<>]+\.(?:png|jpe?g|webp|gif|heic)/gi;
+  const found = new Set<string>();
+  for (const raw of text.split("\n")) {
+    const line = raw.trim().replace(/^[-*•]\s+/, "");
+    if (lineRe.test(line)) {
+      found.add(line);
+      continue;
+    }
+    for (const m of line.matchAll(inlineRe)) found.add(m[0]);
+  }
+  return [...found].slice(0, max);
+}
+
 /** Grobes Seitenverhältnis aus "1536x1024" ableiten. */
 function aspectFromSize(size: string): Aspect {
   const [w, h] = size.split("x").map((v) => parseInt(v, 10));
@@ -335,8 +355,9 @@ export default function App() {
       output: string;
       stderr: string;
       cancelled: boolean;
-    }>("cli-done", (e) => {
+    }>("cli-done", async (e) => {
       const p = e.payload;
+      const job = jobsRef.current.find((j) => j.id === p.job_id);
       commitJobs(jobsRef.current.filter((j) => j.id !== p.job_id));
       if (p.cancelled) {
         pushActivity(`${p.agent}-Job abgebrochen (${p.job_id})`);
@@ -348,11 +369,46 @@ export default function App() {
           ? `${p.agent}-Job fehlgeschlagen (${p.job_id})`
           : `${p.agent}-Job fertig (${p.job_id})`,
       );
+      // Hat der Agent Bilddateien erzeugt, landen sie automatisch in der
+      // Galerie: Pfade aus der Ausgabe fischen und importieren. Der mtime-
+      // Guard (Job-Start minus Slack) hält bloß erwähnte Alt-Bilder draußen.
+      let galleryNote = "";
+      if (!failed && (p.agent === "codex" || p.agent === "claude")) {
+        const imported: string[] = [];
+        for (const path of extractImagePaths(p.output)) {
+          try {
+            const meta = await api.imageImport(
+              path,
+              undefined,
+              job?.startedAt ? job.startedAt - 30_000 : undefined,
+            );
+            setImage(meta.id, {
+              status: "done",
+              url: convertFileSrc(meta.path),
+              meta,
+            });
+            imported.push(`${meta.name} (id ${meta.id})`);
+          } catch (err) {
+            void api.logLine(`auto-import übersprungen (${path}): ${String(err)}`);
+          }
+        }
+        if (imported.length > 0) {
+          pushActivity(
+            imported.length === 1
+              ? "1 Bild in die Galerie importiert"
+              : `${imported.length} Bilder in die Galerie importiert`,
+          );
+          galleryNote =
+            `\nDie erzeugten Bilder wurden automatisch in die Galerie importiert: ` +
+            `${imported.join(", ")}. Zeig sie dem Nutzer mit open_image (einzeln) oder show_gallery.`;
+        }
+      }
       const message =
         `[Hintergrund-Job ${p.job_id} (${p.agent}) ist fertig — Exit-Code ${p.exit_code ?? "?"}.` +
         ` Aufgabe war: ${p.task.slice(0, 300)}]\n` +
         `Ausgabe:\n${p.output.trim() || "(leer)"}` +
         (failed && p.stderr.trim() ? `\nFehlerausgabe:\n${p.stderr.trim()}` : "") +
+        galleryNote +
         `\nBerichte dem Nutzer jetzt knapp mündlich das Ergebnis; Details kannst du als Artefakt zeigen.`;
       if (clientRef.current?.connected) {
         clientRef.current.sendSystemMessage(message);
@@ -364,7 +420,7 @@ export default function App() {
     return () => {
       un.then((f) => f());
     };
-  }, [commitJobs, pushActivity, requestResponse]);
+  }, [commitJobs, pushActivity, requestResponse, setImage]);
 
   // ----------------------------------------------------------------
   // Artefakte
@@ -679,7 +735,10 @@ export default function App() {
                 task,
                 args.cwd ? String(args.cwd) : undefined,
               );
-              commitJobs([...jobsRef.current, { id: jobId, agent, task }]);
+              commitJobs([
+                ...jobsRef.current,
+                { id: jobId, agent, task, startedAt: Date.now() },
+              ]);
               pushActivity(
                 `delegiert an ${agent}: ${task.slice(0, 56)}${task.length > 56 ? "…" : ""}`,
               );
@@ -1454,7 +1513,12 @@ export default function App() {
           // Ohne Delegations-Info verbinden.
         }
       }
-      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${notesInfo}${skillsInfo}${galleryInfo}${cliInfo}`;
+      // YOLO-Modus: Otto muss wissen, dass die üblichen Terminal-Schranken
+      // aufgehoben sind — sonst versucht er destruktive Befehle gar nicht erst.
+      const yoloInfo = current.yolo_mode
+        ? `\n\n--- YOLO-Modus AKTIV ---\nDer Nutzer hat den vollen Systemzugriff freigeschaltet. run_terminal und delegate_task haben KEINE Befehls-Beschränkungen mehr: destruktive Befehle, Downloads, Datei-Umleitungen, Prozess-Steuerung usw. sind alle erlaubt — du arbeitest mit den vollen Rechten des angemeldeten Nutzers, wie in einem normalen Terminal. Echtes root gibt es nur mit sudo und Passwort (nicht-interaktiv nicht möglich). Nutze die Macht verantwortungsvoll: Führe zerstörerische oder weitreichende Befehle (löschen, überschreiben, Systemänderungen) nur auf klare Anweisung aus und fasse vorher kurz zusammen, was du tun wirst.`
+        : "";
+      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${notesInfo}${skillsInfo}${galleryInfo}${cliInfo}${yoloInfo}`;
 
       const client = new RealtimeClient({
         onOpen: () => {

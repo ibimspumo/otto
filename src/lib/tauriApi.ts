@@ -69,8 +69,8 @@ export const imageFavorite = (id: string, favorite: boolean) =>
 export const imageExport = (id: string, dest?: string) =>
   invoke<string>("image_export", { id, dest });
 
-export const imageImport = (source: string, name?: string) =>
-  invoke<ImageMeta>("image_import", { source, name });
+export const imageImport = (source: string, name?: string, newerThanMs?: number) =>
+  invoke<ImageMeta>("image_import", { source, name, newerThanMs });
 
 export const cliJobStart = (agent: string, task: string, cwd?: string) =>
   invoke<string>("cli_job_start", { agent, task, cwd });

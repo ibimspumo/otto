@@ -8,10 +8,15 @@ fn truncate_output(s: &str, max: usize) -> String {
 
 #[tauri::command]
 pub async fn run_terminal(
+    app: tauri::AppHandle,
     command: String,
     timeout_s: Option<u64>,
 ) -> Result<serde_json::Value, String> {
-    crate::shell_safety::validate_shell_command(&command)?;
+    // YOLO-Modus: voller Systemzugriff wie ein normales Terminal — der
+    // Befehls-Filter entfällt. Sonst gilt die restriktive Positivliste.
+    if !crate::settings::yolo_enabled(&app) {
+        crate::shell_safety::validate_shell_command(&command)?;
+    }
     let timeout = std::time::Duration::from_secs(timeout_s.unwrap_or(30).clamp(1, 300));
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = std::process::Command::new("/bin/zsh");
