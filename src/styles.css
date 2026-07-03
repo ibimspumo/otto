@@ -12,6 +12,8 @@
 /* ------------------------------------------------------------------ */
 
 :root {
+  color-scheme: dark;
+
   /* Tinte auf dunklem Glas */
   --ink: rgba(255, 255, 255, 0.92);
   --ink-2: rgba(255, 255, 255, 0.64);
@@ -21,10 +23,13 @@
   --fill: rgba(255, 255, 255, 0.07);
   --fill-2: rgba(255, 255, 255, 0.13);
 
-  /* Flächen */
+  /* Material */
   --card: rgba(24, 24, 28, 0.96);
+  --card-2: rgba(30, 30, 36, 0.96);
   --glass-tint: rgba(15, 15, 19, 0.55);
+  --glass-tint-strong: rgba(12, 12, 16, 0.72);
   --page: #0f0f13;
+  --black: #000;
 
   /* Zustandslicht — gleiche Leuchtdichte, nie als Deko */
   --amber: oklch(0.79 0.13 75);
@@ -36,6 +41,15 @@
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-system: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 150ms;
+  --dur-med: 240ms;
+  --dur-slow: 380ms;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.56), 0 2px 8px rgba(0, 0, 0, 0.36);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -138,15 +152,21 @@ button {
   z-index: 2;
   width: 44px;
   height: 44px;
-  background: #000;
+  background: var(--black);
   border: 1px solid var(--hair);
   border-radius: 999px;
-  box-shadow: none;
-  transition: width 240ms var(--ease-out);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 12px 34px rgba(0, 0, 0, 0.46);
+  transition:
+    width var(--dur-med) var(--ease-system),
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-med) ease;
 }
 
 .island.wide {
   width: 536px;
+  border-color: rgba(255, 255, 255, 0.13);
 }
 
 .island-inner {
@@ -204,7 +224,7 @@ button {
   white-space: nowrap;
   font-size: 12px;
   color: var(--ink-2);
-  animation: caption-in 260ms var(--ease-out);
+  animation: caption-in 260ms var(--ease-system);
 }
 
 .island-caption.error {
@@ -280,12 +300,16 @@ button {
   background: var(--fill);
   color: var(--ink-2);
   font-size: 11px;
-  transition: background 150ms ease, color 150ms ease;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-system);
 }
 
 .island-btn:hover {
   background: var(--fill-2);
   color: var(--ink);
+  transform: translateY(-1px);
 }
 
 .island-btn.active {
@@ -323,7 +347,37 @@ button {
 }
 
 .island-glow {
-  display: none;
+  position: absolute;
+  top: 30px;
+  width: 212px;
+  height: 58px;
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at center, color-mix(in srgb, var(--light) 42%, transparent), transparent 72%);
+  opacity: 0.62;
+  filter: blur(18px);
+  transform: translateY(8px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-med) ease,
+    width var(--dur-med) var(--ease-system);
+  animation: system-breathe 2.8s ease-in-out infinite;
+}
+
+.island.wide + .island-glow {
+  width: 520px;
+}
+
+@keyframes system-breathe {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: translateY(8px) scaleX(0.96);
+  }
+  50% {
+    opacity: 0.72;
+    transform: translateY(9px) scaleX(1);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -343,30 +397,70 @@ button {
 .drop {
   position: relative;
   width: 304px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--card);
   border: 1px solid var(--hair-2);
-  box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.5),
-    0 1px 3px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-card);
   cursor: zoom-in;
   overflow: hidden;
-  animation: drop-in 360ms var(--ease-out);
-  transition: border-color 150ms ease, transform 200ms var(--ease-out);
+  animation: drop-in var(--dur-slow) var(--ease-system);
+  transition:
+    border-color var(--dur-fast) ease,
+    transform 200ms var(--ease-system),
+    background var(--dur-fast) ease;
 }
 
 .drop:hover {
   border-color: rgba(255, 255, 255, 0.26);
+  background: var(--card-2);
+  transform: translateY(-1px);
+}
+
+.drop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(115deg, transparent 0 38%, rgba(255, 255, 255, 0.07) 48%, transparent 58% 100%);
+  opacity: 0;
+  transform: translateX(-38%);
+  pointer-events: none;
+}
+
+.drop.hero::before {
+  animation: materialize-sheen 700ms var(--ease-system) 90ms both;
+}
+
+.drop > * {
+  position: relative;
+  z-index: 2;
 }
 
 @keyframes drop-in {
   from {
     opacity: 0;
-    transform: translateX(-16px) scale(0.98);
+    transform: translateX(-18px) translateY(8px) scale(0.975);
+    filter: blur(8px);
   }
   to {
     opacity: 1;
     transform: none;
+    filter: none;
+  }
+}
+
+@keyframes materialize-sheen {
+  0% {
+    opacity: 0;
+    transform: translateX(-44%);
+  }
+  38% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(44%);
   }
 }
 
@@ -612,22 +706,73 @@ button {
   position: relative;
   display: flex;
   flex-direction: column;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--glass-tint);
   border: 1px solid var(--hair-2);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  animation: ql-in 260ms var(--ease-out);
+  box-shadow:
+    var(--shadow-panel),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: ql-in 300ms var(--ease-system);
+  isolation: isolate;
+}
+
+.ql-shell::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.13), transparent 30%),
+    radial-gradient(circle at 84% 12%, color-mix(in srgb, var(--violet) 22%, transparent), transparent 34%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.ql-shell[data-placement="rightShelf"] {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.ql-shell[data-placement="rightShelf"]::after {
+  content: "";
+  position: absolute;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--violet) 70%, transparent),
+    transparent
+  );
+  opacity: 0.78;
+  pointer-events: none;
+  animation: edge-life 2.4s ease-in-out infinite;
 }
 
 @keyframes ql-in {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.96);
+    transform: translateY(18px) scale(0.965);
+    filter: blur(10px);
   }
   to {
     opacity: 1;
     transform: none;
+    filter: none;
+  }
+}
+
+@keyframes edge-life {
+  0%,
+  100% {
+    opacity: 0.46;
+  }
+  50% {
+    opacity: 0.95;
   }
 }
 
@@ -642,7 +787,7 @@ button {
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  background: linear-gradient(to bottom, rgba(8, 8, 12, 0.72), transparent);
+  background: linear-gradient(to bottom, var(--glass-tint-strong), transparent);
 }
 
 .ql-shell[data-kind="html"] .ql-bar {
@@ -687,7 +832,7 @@ button {
 .ql-actions button {
   font-size: 11.5px;
   padding: 4px 11px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--fill-2);
   color: var(--ink);
 }
@@ -885,6 +1030,11 @@ button {
   margin: 0 auto;
 }
 
+.ql-shell[data-placement="rightShelf"] .search-list {
+  max-width: none;
+  margin: 0;
+}
+
 .search-query {
   font-size: 12px;
   color: var(--ink-2);
@@ -899,6 +1049,23 @@ button {
 .search-result {
   padding: 12px 0;
   border-bottom: 1px solid var(--hair);
+  animation: result-in 260ms var(--ease-system) both;
+}
+
+.search-result:nth-of-type(2) { animation-delay: 35ms; }
+.search-result:nth-of-type(3) { animation-delay: 70ms; }
+.search-result:nth-of-type(4) { animation-delay: 105ms; }
+.search-result:nth-of-type(5) { animation-delay: 140ms; }
+
+@keyframes result-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .search-result:first-of-type {
@@ -1211,7 +1378,7 @@ button {
 .group-box {
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid var(--hair);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -1274,7 +1441,7 @@ select,
 textarea {
   background: rgba(0, 0, 0, 0.26);
   border: 1px solid var(--hair-2);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: 12.5px;
@@ -1360,7 +1527,7 @@ textarea {
 .push {
   font-size: 12.5px;
   padding: 5px 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--fill-2);
   border: 1px solid var(--hair);
   color: var(--ink);

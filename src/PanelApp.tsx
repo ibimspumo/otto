@@ -8,7 +8,12 @@ import {
   safeHost,
   type ImageAction,
 } from "./components/ArtifactContent";
-import { DROP_W, layoutDrops, layoutQuickLook } from "./lib/hudWindow";
+import {
+  DROP_W,
+  layoutDrops,
+  layoutQuickLook,
+  type PresentationPlacement,
+} from "./lib/hudWindow";
 import type { Artifact, ImageState } from "./lib/types";
 
 /** Zustand, den das Hauptfenster (der Orchestrator) hierher spiegelt. */
@@ -100,12 +105,17 @@ function desiredQuickLook(
       return { w: 960 * boost, h: 660 * boost };
     }
     case "html":
-      return { w: 980 * boost, h: 700 * boost };
+      return { w: 940 * boost, h: 720 * boost };
     case "search":
-      return { w: 620 * boost, h: 680 * boost };
+      return { w: 680 * boost, h: 760 * boost };
     default:
       return { w: 720 * boost, h: 680 * boost };
   }
+}
+
+function preferredPlacement(a: Artifact): PresentationPlacement {
+  if (a.kind === "search") return "rightShelf";
+  return "center";
 }
 
 // ------------------------------------------------------------------
@@ -360,7 +370,7 @@ export default function PanelApp() {
   useEffect(() => {
     if (mode !== "quicklook" || !qlArtifact) return;
     const want = desiredQuickLook(qlArtifact, images, qlSize);
-    void layoutQuickLook(want.w, want.h, qlSize);
+    void layoutQuickLook(want.w, want.h, qlSize, preferredPlacement(qlArtifact));
     // Bewusst nur bei Artefakt-/Größenwechsel, nicht bei jedem images-Tick:
     // die Ratio steht schon während der Generierung fest (size).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -385,7 +395,11 @@ export default function PanelApp() {
   if (mode === "quicklook" && qlArtifact) {
     const copyable = qlArtifact.kind !== "image";
     return (
-      <div className="ql-shell" data-kind={qlArtifact.kind}>
+      <div
+        className="ql-shell"
+        data-kind={qlArtifact.kind}
+        data-placement={preferredPlacement(qlArtifact)}
+      >
         <div className="ql-bar" data-tauri-drag-region>
           <button
             className="ql-close"

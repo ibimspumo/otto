@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import {
+  availableMonitors,
   currentMonitor,
   getCurrentWindow,
   primaryMonitor,
@@ -19,6 +20,46 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 async function anyMonitor(): Promise<Monitor | null> {
   return (await currentMonitor()) ?? (await primaryMonitor());
+}
+
+async function activeMonitor(): Promise<Monitor | null> {
+  const current = await currentMonitor();
+  if (current) return current;
+  const primary = await primaryMonitor();
+  if (primary) return primary;
+  const monitors = await availableMonitors().catch(() => []);
+  return monitors[0] ?? null;
+}
+
+function workArea(monitor: Monitor) {
+  const sf = monitor.scaleFactor;
+  const x = monitor.position.x / sf;
+  const y = monitor.position.y / sf;
+  const w = monitor.size.width / sf;
+  const h = monitor.size.height / sf;
+  return {
+    x,
+    y,
+    w,
+    h,
+    top: y + 52,
+    right: x + w - 18,
+    bottom: y + h - 76,
+    left: x + 18,
+  };
+}
+
+function fitWithin(
+  wantW: number,
+  wantH: number,
+  maxW: number,
+  maxH: number,
+): { w: number; h: number } {
+  const scale = Math.min(1, maxW / wantW, maxH / wantH);
+  return {
+    w: Math.round(wantW * scale),
+    h: Math.round(wantH * scale),
+  };
 }
 
 // ------------------------------------------------------------------
@@ -122,6 +163,8 @@ export const DROP_W = 304;
 
 const QL_RADIUS = 16;
 
+export type PresentationPlacement = "center" | "rightShelf" | "leftShelf";
+
 async function panelWindow(): Promise<WebviewWindow | null> {
   return WebviewWindow.getByLabel("panel");
 }
@@ -133,9 +176,10 @@ async function panelWindow(): Promise<WebviewWindow | null> {
 export async function layoutDrops(contentHeight: number): Promise<void> {
   try {
     const panel = await panelWindow();
-    const monitor = await anyMonitor();
+    const monitor = await activeMonitor();
     if (!panel || !monitor) return;
     const sf = monitor.scaleFactor;
+    const area = workArea(monitor);
     const w = Math.round((DROP_W + DROP_PAD * 2) * sf);
     const h = Math.round((contentHeight + DROP_PAD * 2) * sf);
     await invoke("panel_vibrancy", { enable: false, radius: 0 }).catch(() => {});
@@ -143,8 +187,8 @@ export async function layoutDrops(contentHeight: number): Promise<void> {
     await panel.setSize(new PhysicalSize(w, h));
     await panel.setPosition(
       new PhysicalPosition(
-        Math.round(monitor.position.x + 12 * sf),
-        Math.round(monitor.position.y + monitor.size.height - h - 78 * sf),
+        Math.round(area.left * sf),
+        Math.round((area.bottom - h / sf) * sf),
       ),
     );
     await panel.setAlwaysOnTop(true);
@@ -162,34 +206,47 @@ export async function layoutQuickLook(
   wantW: number,
   wantH: number,
   size: "normal" | "large" = "normal",
+  placement: PresentationPlacement = "center",
 ): Promise<{ w: number; h: number }> {
   const fallback = { w: wantW, h: wantH };
   try {
     const panel = await panelWindow();
-    const monitor = await anyMonitor();
+    const monitor = await activeMonitor();
     if (!panel || !monitor) return fallback;
     const sf = monitor.scaleFactor;
-    const max = size === "large" ? 0.96 : 0.85;
-    const maxW = (monitor.size.width / sf) * max;
-    const maxH = (monitor.size.height / sf) * max;
-    // Proportional einpassen — die Aspect Ratio des Inhalts bleibt erhalten.
-    const scale = Math.min(1, maxW / wantW, maxH / wantH);
-    const w = Math.round(wantW * scale);
-    const h = Math.round(wantH * scale);
+    const area = workArea(monitor);
+    const usableW = area.right - area.left;
+    const usableH = area.bottom - area.top;
+    const max =
+      placement === "center"
+        ? size === "large"
+          ? 0.96
+          : 0.85
+        : size === "large"
+          ? 0.94
+          : 0.9;
+    const maxW =
+      placement === "center"
+        ? usableW * max
+        : Math.min(760, Math.max(460, usableW * 0.48)) * max;
+    const maxH = usableH * max;
+    const { w, h } = fitWithin(wantW, wantH, maxW, maxH);
+    const x =
+      placement === "rightShelf"
+        ? area.right - w
+        : placement === "leftShelf"
+          ? area.left
+          : area.x + (area.w - w) / 2;
+    const y =
+      placement === "center"
+        ? Math.max(area.top, area.y + (area.h - h) / 2 - 16)
+        : area.top + Math.max(0, (usableH - h) / 2);
     await invoke("panel_vibrancy", { enable: true, radius: QL_RADIUS }).catch(
       () => {},
     );
     await panel.setShadow(size === "normal").catch(() => {});
     await panel.setSize(new PhysicalSize(Math.round(w * sf), Math.round(h * sf)));
-    await panel.setPosition(
-      new PhysicalPosition(
-        Math.round(monitor.position.x + (monitor.size.width - w * sf) / 2),
-        Math.round(
-          monitor.position.y +
-            Math.max(44 * sf, (monitor.size.height - h * sf) / 2 - 16 * sf),
-        ),
-      ),
-    );
+    await panel.setPosition(new PhysicalPosition(Math.round(x * sf), Math.round(y * sf)));
     await panel.setAlwaysOnTop(false);
     await panel.setFocus();
     return { w, h };

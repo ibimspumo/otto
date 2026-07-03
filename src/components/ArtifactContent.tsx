@@ -15,14 +15,17 @@ export type ImageAction = "favorite" | "delete" | "save";
 
 /** Bindet STYLE.css in ein HTML-Artefakt ein — egal ob Fragment oder ganze Seite. */
 export function buildHtmlDoc(content: string, css: string): string {
-  const style = `<style>${css}</style>`;
-  if (/<html[\s>]/i.test(content)) {
-    if (/<head[\s>]/i.test(content)) {
-      return content.replace(/<head([^>]*)>/i, `<head$1>${style}`);
-    }
-    return content.replace(/<html([^>]*)>/i, `<html$1><head>${style}</head>`);
+  const head = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${css.trim() ? `<style data-otto-style>${css}</style>` : ""}`;
+  if (/<head[\s>]/i.test(content)) {
+    return content.replace(/<head([^>]*)>/i, `<head$1>${head}`);
   }
-  return `<!doctype html><html><head><meta charset="utf-8">${style}</head><body>${content}</body></html>`;
+  if (/<html[\s>]/i.test(content)) {
+    return content.replace(/<html([^>]*)>/i, `<html$1><head>${head}</head>`);
+  }
+  if (/<body[\s>]/i.test(content)) {
+    return content.replace(/<body([^>]*)>/i, `<head>${head}</head><body$1>`);
+  }
+  return `<!doctype html><html><head>${head}</head><body>${content}</body></html>`;
 }
 
 /** Links aus Artefakten öffnen immer im Standard-Browser. */

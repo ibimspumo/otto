@@ -619,6 +619,7 @@ export default function App() {
               content: res.query,
               results: res.results,
             });
+            presentArtifact("gross", artifactId);
             out = { ok: true, artifact_id: artifactId, results: res.results };
             break;
           }

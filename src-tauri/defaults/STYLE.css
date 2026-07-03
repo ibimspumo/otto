@@ -1,109 +1,206 @@
-/* STYLE.css — Design-System für Ottos HTML-Artefakte.
+/* STYLE.css — Ottos Artefakt-Designsystem.
    Wird automatisch in jedes HTML-Artefakt eingebunden.
-   Otto darf diese Datei über set_artifact_style anpassen. */
+   Gleiche Materialsprache wie Insel, Drops und Quick Look: monochrome
+   Systemflächen; Farbe nur als Zustandslicht. */
 
 :root {
-  --bg: #0a0c10;
-  --surface: #10151c;
-  --line: #232b36;
-  --text: #e8e4da;
-  --muted: #9a948a;
-  --accent: #f0a850;   /* Bernstein */
-  --accent-2: #8fc6dc; /* Eisblau */
-  --accent-3: #b6a3ee; /* Violett */
-  --good: #8fce9a;
-  --bad: #e2695f;
+  color-scheme: dark;
+  --ink: rgba(255, 255, 255, 0.92);
+  --ink-2: rgba(255, 255, 255, 0.66);
+  --ink-3: rgba(255, 255, 255, 0.44);
+  --hair: rgba(255, 255, 255, 0.1);
+  --hair-2: rgba(255, 255, 255, 0.16);
+  --fill: rgba(255, 255, 255, 0.07);
+  --fill-2: rgba(255, 255, 255, 0.13);
+  --page: #0f0f13;
+  --surface: rgba(255, 255, 255, 0.055);
+  --surface-2: rgba(255, 255, 255, 0.085);
+  --amber: oklch(0.79 0.13 75);
+  --ice: oklch(0.82 0.08 220);
+  --violet: oklch(0.75 0.11 300);
+  --good: oklch(0.78 0.11 145);
+  --bad: oklch(0.7 0.16 25);
   --radius: 10px;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --ease-system: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * { box-sizing: border-box; }
 
+html {
+  background: var(--page);
+}
+
 body {
   margin: 0;
-  padding: 24px;
-  background: var(--bg);
-  color: var(--text);
-  font-family: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
-  font-size: 15px;
-  line-height: 1.6;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 82% 0%, color-mix(in srgb, var(--violet) 18%, transparent), transparent 30%),
+    var(--page);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.58;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: linear-gradient(to bottom, transparent, var(--violet), transparent);
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 h1, h2, h3 {
-  font-family: "Chakra Petch", "Avenir Next Condensed", sans-serif;
-  letter-spacing: 0.03em;
-  margin: 0 0 0.6em;
+  margin: 0 0 0.65em;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-wrap: balance;
 }
 
-h1 { font-size: 1.55rem; border-bottom: 1px solid var(--line); padding-bottom: 0.4rem; }
-h2 { font-size: 1.2rem; }
-h3 { font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+h1 {
+  font-size: 1.55rem;
+  line-height: 1.15;
+  padding-bottom: 0.52rem;
+  border-bottom: 1px solid var(--hair);
+}
 
-a { color: var(--accent-2); }
+h2 {
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+
+h3 {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+}
+
+p, ul, ol {
+  margin: 0 0 0.9rem;
+  text-wrap: pretty;
+}
+
+ul, ol {
+  padding-left: 1.35rem;
+}
+
+a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.34);
+  text-underline-offset: 2px;
+}
 
 code, pre {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.85em;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
 }
-pre { padding: 14px; overflow-x: auto; }
-code { padding: 1px 6px; }
-pre code { border: none; padding: 0; }
 
-table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+code {
+  padding: 1px 6px;
+  border: 1px solid var(--hair);
+  border-radius: 5px;
+  background: var(--fill);
+}
+
+pre {
+  margin: 12px 0;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+table {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hair);
+  text-align: left;
+}
+
 th {
-  color: var(--muted);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-family: "IBM Plex Mono", monospace;
+  color: var(--ink-2);
+  font-size: 0.78rem;
+  font-weight: 600;
 }
-
-/* Bausteine */
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 18px 20px;
   margin: 12px 0;
+  padding: 16px 18px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .grid {
   display: grid;
-  gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
 }
 
 .badge {
-  display: inline-block;
-  padding: 2px 12px;
-  border: 1px solid var(--accent);
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 1px 9px;
+  border: 1px solid var(--hair-2);
   border-radius: 999px;
-  font-size: 0.75rem;
-  font-family: "IBM Plex Mono", monospace;
+  background: var(--fill);
+  color: var(--ink-2);
+  font-size: 0.76rem;
+  font-weight: 600;
 }
 
 .kpi {
-  font-size: 2.4rem;
-  font-weight: 600;
-  color: var(--accent);
-  font-family: "Chakra Petch", sans-serif;
-  line-height: 1.1;
+  font-size: 2.2rem;
+  line-height: 1.05;
+  font-weight: 650;
+  letter-spacing: 0;
 }
 
-.muted { color: var(--muted); }
+.muted { color: var(--ink-2); }
 .good { color: var(--good); }
 .bad { color: var(--bad); }
 
 .bar {
   height: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 4px;
   overflow: hidden;
+  border: 1px solid var(--hair);
+  border-radius: 999px;
+  background: var(--fill);
 }
-.bar > span { display: block; height: 100%; background: var(--accent); }
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--violet), var(--ice));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body::before {
+    animation: artifact-life 2.8s ease-in-out infinite;
+  }
+}
+
+@keyframes artifact-life {
+  0%, 100% { opacity: 0.34; }
+  50% { opacity: 0.72; }
+}
