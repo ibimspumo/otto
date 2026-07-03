@@ -10,9 +10,11 @@ import {
 import {
   DROP_W,
   layoutDrops,
+  layoutEdgeTab,
   layoutQuickLook,
   type PresentationPlacement,
 } from "./lib/hudWindow";
+import * as api from "./lib/tauriApi";
 import type { Artifact, ImageState } from "./lib/types";
 
 /** Zustand, den das Hauptfenster (der Orchestrator) hierher spiegelt. */
@@ -22,7 +24,15 @@ interface PanelState {
   images: Record<string, ImageState>;
 }
 
-type Mode = "stack" | "quicklook";
+/**
+ * stack     — der sichtbare Drop-Stapel unten links
+ * tucked    — zurückgezogen: nur ein schmaler Leucht-Tab an der Kante
+ * quicklook — Großansicht eines Artefakts
+ */
+type Mode = "stack" | "tucked" | "quicklook";
+
+/** Ruhezeit, nach der sich der Stapel von selbst zurückzieht. */
+const TUCK_AFTER_MS = 10_000;
 type PresentMode = "gross" | "riesig" | "klein";
 type QuickLookSize = "normal" | "large";
 
@@ -103,6 +113,8 @@ function desiredQuickLook(
     }
     case "search":
       return { w: 680 * boost, h: 760 * boost };
+    case "job":
+      return { w: 760 * boost, h: 540 * boost };
     default:
       return { w: 720 * boost, h: 680 * boost };
   }
@@ -171,6 +183,25 @@ function DropPreview({
           })}
         </div>
       );
+    case "job": {
+      const lines = artifact.jobLines ?? [];
+      const tail = lines.slice(-5);
+      return (
+        <div className="mini-term" aria-hidden>
+          {tail.length > 0 ? (
+            tail.map((l, i) => (
+              <p key={`${lines.length}-${i}`} className="mini-term-line">
+                {l}
+              </p>
+            ))
+          ) : (
+            <p className="mini-term-line dim">
+              {artifact.jobStatus === "running" ? "startet…" : "keine Ausgabe"}
+            </p>
+          )}
+        </div>
+      );
+    }
   }
 }
 
@@ -179,9 +210,12 @@ const KIND_LABEL: Record<Artifact["kind"], string> = {
   code: "Code",
   search: "Suche",
   image: "Bild",
+  job: "Job",
 };
 
+/** "Arbeitet noch": hält Lebensader an, verhindert Ablauf und Zurückziehen. */
 function isGenerating(a: Artifact, images: Record<string, ImageState>): boolean {
+  if (a.kind === "job") return a.jobStatus === "running";
   return (
     a.kind === "image" &&
     (a.imageIds ?? []).some((id) => images[id]?.status === "generating")
@@ -201,6 +235,11 @@ export default function PanelApp() {
   const [mode, setMode] = useState<Mode>("stack");
   const [qlId, setQlId] = useState<string | null>(null);
   const [qlSize, setQlSize] = useState<QuickLookSize>("normal");
+  // Maus über dem Stapel? Dann zieht er sich nicht zurück.
+  const [hovered, setHovered] = useState(false);
+  // Remount-Schlüssel: beim Hervorkommen aus dem Tab bauen sich die
+  // Karten gestaffelt neu auf (Animationen laufen erneut).
+  const [revealKey, setRevealKey] = useState(0);
   // Quick-Look-Wunsch per Stimme, dessen Artefakt noch nicht im
   // gespiegelten Zustand angekommen ist — wird beim nächsten Update eingelöst.
   const [pendingQl, setPendingQl] = useState<{
@@ -223,6 +262,17 @@ export default function PanelApp() {
         setMode("stack");
         setQlId(null);
         setQlSize("normal");
+      } else if (modeRef.current === "tucked") {
+        // Explizit angefordert (Stimme/Insel): aus dem Tab hervorkommen.
+        setRevealKey((k) => k + 1);
+        setMode("stack");
+      }
+    });
+    // Hot Corner: Maus unten links weckt den zurückgezogenen Stapel.
+    const unCorner = listen("hot-corner", () => {
+      if (modeRef.current === "tucked") {
+        setRevealKey((k) => k + 1);
+        setMode("stack");
       }
     });
     // Quick Look per Stimme (present_artifact) — wirkt wie ein Klick.
@@ -259,6 +309,7 @@ export default function PanelApp() {
       unState.then((f) => f());
       unOpen.then((f) => f());
       unPresent.then((f) => f());
+      unCorner.then((f) => f());
     };
   }, []);
 
@@ -344,6 +395,43 @@ export default function PanelApp() {
     if (mode === "stack") void layoutDrops(stackH);
   }, [mode, stackH]);
 
+  // ---- Lebenszyklus: zurückziehen & hervorkommen --------------------
+
+  const anyGenerating = artifacts.some((a) => isGenerating(a, images));
+  // Identität des Inhalts (neu/aktualisiert), unabhängig von Bild-Ticks.
+  const artSig = artifacts.map((a) => `${a.id}:${a.updatedAt}`).join("|");
+
+  // Nach Ruhezeit zieht sich der Stapel zur Kante zurück — nie während
+  // etwas generiert, nie solange die Maus darüber ist.
+  useEffect(() => {
+    if (mode !== "stack" || hovered || anyGenerating || artifacts.length === 0) return;
+    const t = setTimeout(() => setMode("tucked"), TUCK_AFTER_MS);
+    return () => clearTimeout(t);
+    // artSig als Dep: jede neue/aktualisierte Karte startet die Ruhezeit neu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, hovered, anyGenerating, artSig]);
+
+  // Neuer Inhalt, während der Stapel eingezogen ist → hervorkommen und zeigen.
+  const prevSigRef = useRef(artSig);
+  useEffect(() => {
+    if (mode === "tucked" && artSig !== prevSigRef.current && artifacts.length > 0) {
+      setRevealKey((k) => k + 1);
+      setMode("stack");
+    }
+    prevSigRef.current = artSig;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artSig, mode]);
+
+  // Eingezogen: winziges Tab-Fenster + Ecken-Poller an (und wieder aus).
+  useEffect(() => {
+    if (mode !== "tucked") return;
+    void layoutEdgeTab();
+    void api.hotCornerStart().catch(() => {});
+    return () => {
+      void api.hotCornerStop().catch(() => {});
+    };
+  }, [mode]);
+
   // Quick Look: Fenster wächst zur Inhaltsgröße (Bilder in echter Ratio).
   useEffect(() => {
     if (mode !== "quicklook" || !qlArtifact) return;
@@ -419,9 +507,36 @@ export default function PanelApp() {
     );
   }
 
+  // --- Leucht-Tab (zurückgezogen) -------------------------------------
+  if (mode === "tucked") {
+    return (
+      <div
+        className="edge-tab"
+        role="button"
+        aria-label={`${artifacts.length} Ergebnisse zeigen`}
+        title="Ergebnisse zeigen"
+        onMouseEnter={() => {
+          setRevealKey((k) => k + 1);
+          setMode("stack");
+        }}
+        onClick={() => {
+          setRevealKey((k) => k + 1);
+          setMode("stack");
+        }}
+      >
+        <span className="edge-tab-light" aria-hidden />
+      </div>
+    );
+  }
+
   // --- Drop-Stapel ---------------------------------------------------
   return (
-    <div className="drops">
+    <div
+      className="drops"
+      key={revealKey}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {overflow > 0 && (
         <div className="drop-chip">{overflow} weitere im Stapel</div>
       )}

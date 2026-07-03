@@ -71,11 +71,16 @@ export const toolDefs = [
     type: "function",
     name: "web_search",
     description:
-      "Websuche über Brave Search. Dies ist nur Schritt 1 einer Recherche: Du bekommst Quellen als JSON zurück, aber noch keine fertige Nutzer-Ausgabe. Wenn der Nutzer eine Recherche/Websuche will, musst du danach immer ein Markdown-Artefakt mit create_artifact(kind=\"markdown\", present=true) erstellen, das die Ergebnisse auswertet, strukturiert und Quellen verlinkt. Nutze Tabellen, Abschnitte und bei Bedarf Mermaid-Diagramme. Wenn der Nutzer ausdrücklich die rohe Webrecherche, Quellenliste oder Suchergebnisse sehen will, setze show_results=true; dann erscheint zusätzlich ein Such-Artefakt mit den Rohquellen. Nutze dies für aktuelle oder unsichere Fakten.",
+      "Websuche über Brave Search. Mit type steuerst du die Suchart: \"web\" (Standard), \"news\" (aktuelle Nachrichten — für „was gibt's Neues zu…“), \"images\" (Web-Bildersuche — für „zeig mir Bilder von…“, NICHT für Bild-Generierung) und \"videos\". Bilder- und Video-Treffer werden dem Nutzer automatisch als visuelle Quellenfläche gezeigt. Für web/news gilt: Das ist nur Schritt 1 einer Recherche — du bekommst Quellen als JSON, und erstellst danach immer ein Markdown-Artefakt mit create_artifact(kind=\"markdown\", present=true), das die Ergebnisse auswertet, strukturiert und Quellen verlinkt. Wenn der Nutzer ausdrücklich die rohe Quellenliste sehen will, setze show_results=true. Nutze dies für aktuelle oder unsichere Fakten.",
     parameters: {
       type: "object",
       properties: {
         query: { type: "string", description: "Suchanfrage" },
+        type: {
+          type: "string",
+          enum: ["web", "news", "images", "videos"],
+          description: "Suchart (Standard: web)",
+        },
         count: {
           type: "number",
           description: "Anzahl Ergebnisse (1–20, Standard 6)",
@@ -186,6 +191,101 @@ export const toolDefs = [
         job_id: { type: "string", description: "Die job_id oder \"all\"" },
       },
       required: ["job_id"],
+    },
+  },
+  {
+    type: "function",
+    name: "read_job_output",
+    description:
+      "Liest den aktuellen Live-Output eines Hintergrund-Jobs (letzte Zeilen + Status), WÄHREND er läuft — damit kannst du dem Nutzer jederzeit sagen, was der Job gerade tut oder woran er hängt. Ohne job_id: der neueste Job. Funktioniert auch nach Job-Ende.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "Optional: die job_id. Ohne Angabe der neueste Job.",
+        },
+        lines: {
+          type: "number",
+          description: "Wie viele der letzten Zeilen (5–200, Standard 40).",
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "show_job",
+    description:
+      "Holt das Live-Terminal eines Hintergrund-Jobs groß in den Vordergrund (Quick Look) — wenn der Nutzer sehen will, was da gerade passiert („zeig mir das Terminal“, „hol den Job nach vorn“). Ohne job_id: der neueste Job.",
+    parameters: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "Optional: die job_id. Ohne Angabe der neueste Job.",
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "read_document",
+    description:
+      "Liest ein Dokument (PDF) von einem lokalen Pfad oder einer URL und beantwortet deine Frage dazu bzw. fasst es zusammen (via OpenRouter). Nutze dies bei „lies dieses PDF“, „was steht im Vertrag“, „fass das Dokument zusammen“. Danach zeigst du das Ergebnis als Markdown-Artefakt. Lokale Pfade findest du bei Bedarf vorher mit mdfind (Skill mac-dateisuche).",
+    parameters: {
+      type: "object",
+      properties: {
+        source: {
+          type: "string",
+          description: "Dateipfad (absolut oder ~/…) oder https-URL des PDFs",
+        },
+        frage: {
+          type: "string",
+          description:
+            "Optional: konkrete Frage ans Dokument. Ohne Angabe: strukturierte Zusammenfassung.",
+        },
+      },
+      required: ["source"],
+    },
+  },
+  {
+    type: "function",
+    name: "research_task",
+    description:
+      "Startet eine GRÜNDLICHE Hintergrund-Recherche (Deep-Research-Modell mit Websuche, dauert einige Minuten, kostet ca. 0,5–2 €). Der Lauf erscheint als Live-Job-Drop; du bleibst ansprechbar und bekommst das fertige Dossier automatisch als Systemnachricht — dann erstellst du daraus ein Markdown-Artefakt. Nutze dies NUR wenn der Nutzer ausdrücklich eine tiefe/gründliche Recherche will — für schnelle Fakten reicht web_search.",
+    parameters: {
+      type: "object",
+      properties: {
+        frage: {
+          type: "string",
+          description:
+            "Die Recherche-Frage, präzise und mit Kontext (was, wofür, welche Aspekte).",
+        },
+      },
+      required: ["frage"],
+    },
+  },
+  {
+    type: "function",
+    name: "screen_context",
+    description:
+      "Liest, wo der Nutzer gerade ist: fokussierte App, Fenstertitel, aktuell MARKIERTER Text, Mausposition und aktiver Monitor. Nutze dies IMMER ZUERST, wenn der Nutzer sich auf „das hier“, „diesen Text“, „diese App“ oder seinen Bildschirm bezieht — statt nachzufragen. Fenstertitel und markierter Text brauchen die Bedienungshilfen-Freigabe (accessibility=false heißt: nicht erteilt).",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
+    name: "look_at_screen",
+    description:
+      "Otto sieht den Bildschirm: Liest einen Screenshot aus der Zwischenablage und legt ihn als Bild in die Konversation — danach kannst du beschreiben, analysieren und Fragen dazu beantworten. Liegt KEIN frisches Bild in der Zwischenablage, sage dem Nutzer, er soll ⌘⇧⌃4 drücken (Bereich aufziehen — der Screenshot landet in der Zwischenablage) und rufe das Tool danach erneut auf. Nutze dies bei „schau mal“, „was siehst du“, „was steht in dieser Fehlermeldung“ u. ä.",
+    parameters: {
+      type: "object",
+      properties: {
+        frage: {
+          type: "string",
+          description:
+            "Optional: Worauf du beim Bild achten sollst (wird mit dem Bild übergeben).",
+        },
+      },
     },
   },
   {
@@ -438,6 +538,8 @@ Neben deiner Stimme hast du Artefakte: Mit create_artifact und update_artifact z
 Gedächtnis: Du hast drei Schichten. (1) MEMORY.md und USER.md unten — kuratiertes Langzeitwissen, wird automatisch gepflegt. (2) Tagesnotizen der letzten Tage — rohe Fakten aus jüngsten Gesprächen, stehen ebenfalls unten. (3) search_sessions — Volltextsuche über ALLE alten Gesprächsprotokolle, wenn sich der Nutzer auf Früheres bezieht. Mit remember hältst du sofort Wichtiges in MEMORY.md fest (Budget beachten; bei Überlauf rewrite_memory). Frag NIE nach Dingen, die du selbst nachschlagen kannst — erst suchen (search_sessions, run_terminal, web_search), dann fragen.
 Skills: Unten steht eine Liste deiner Skills (Name + Beschreibung). Passt einer zur Aufgabe, lies ihn ZUERST mit read_skill und folge ihm. Nach verifiziertem Erfolg bei einer neuen, wiederkehrenden Aufgabenart legst du mit save_skill selbst einen an (kurz, konkret, mit Stolperfallen) — so wirst du von Mal zu Mal besser. Falsche Skills löschst du mit delete_skill.
 Bilder: Mit generate_image erzeugst du Bilder (Standard 1K quadratisch; „Logo“ → transparent=true; „4K“ → resolution="4K"; „zwei Versionen“ → n=2). Wünscht der Nutzer ein bestimmtes Modell („nimm mal Flux“), löst du es mit find_image_model auf und übergibst die id als model. Mit edit_image bearbeitest du ein vorhandenes Bild weiter. Der Nutzer zählt Bilder nach Galerie-Nummer („Bild 6“) — Nummern stehen in den Tool-Ergebnissen oder via list_images. open_image zeigt ein Bild groß, show_gallery die ganze Bibliothek, manage_image löscht/benennt/favorisiert/speichert. Die Bibliothek ist persistent.
-Für alles Größere gibt es delegate_task: Es startet einen lokalen Hintergrund-Agenten (Codex CLI oder Claude CLI) mit Datei- und Terminal-Zugriff und kehrt sofort zurück — du bleibst ansprechbar, das Ergebnis kommt automatisch als Systemnachricht und du berichtest dann knapp. Erzeugt ein Job Bilddateien, gib dem Agenten in der Aufgabe mit, am Ende die absoluten Pfade auszugeben — diese Bilder landen automatisch in der Galerie und die Galerie-ids stehen in der Ergebnis-Nachricht. Mit cancel_job brichst du laufende Jobs (auch Hintergrund-Terminals) ab, sobald der Nutzer das will.
+Für alles Größere gibt es delegate_task: Es startet einen lokalen Hintergrund-Agenten (Codex CLI oder Claude CLI) mit Datei- und Terminal-Zugriff und kehrt sofort zurück — du bleibst ansprechbar, das Ergebnis kommt automatisch als Systemnachricht und du berichtest dann knapp. Erzeugt ein Job Bilddateien, gib dem Agenten in der Aufgabe mit, am Ende die absoluten Pfade auszugeben — diese Bilder landen automatisch in der Galerie und die Galerie-ids stehen in der Ergebnis-Nachricht. Mit cancel_job brichst du laufende Jobs (auch Hintergrund-Terminals) ab, sobald der Nutzer das will. Jobs sind GLÄSERN: Jeder Hintergrund-Job erscheint als Live-Terminal-Drop. Fragt der Nutzer, was ein Job gerade macht oder wie weit er ist, liest du mit read_job_output die letzten Zeilen und beantwortest es KONKRET (nie nur „läuft noch“). Will er zusehen („zeig mir das Terminal“, „hol das nach vorn“), nutzt du show_job.
+Sehen: Du bist nicht blind. Mit screen_context weißt du sofort, welche App und welches Fenster im Fokus sind, was der Nutzer MARKIERT hat und auf welchem Monitor er arbeitet — nutze das, statt zu fragen („fass das zusammen“ → screen_context liest die Markierung). Mit look_at_screen siehst du einen Screenshot: Liegt keiner in der Zwischenablage, bitte den Nutzer kurz um ⌘⇧⌃4 (Bereich aufziehen) und rufe das Tool dann erneut auf.
+Dokumente & tiefe Recherche: Mit read_document liest du PDFs (Pfad oder URL) und beantwortest Fragen dazu — Ergebnis danach als Markdown-Artefakt zeigen. Für ausdrücklich gründliche Recherchen startet research_task ein Deep-Research-Dossier als Hintergrund-Job (Minuten, sichtbar als Live-Drop); für schnelle Fakten bleibt web_search das Mittel der Wahl.
 Werkzeuge nutzt du still: kein Zwang, Wartezeiten zu füllen — die Insel zeigt dem Nutzer live an, was gerade passiert. Nach dem Ergebnis fasst du mündlich knapp zusammen, Details stehen im Artefakt.
 Die folgenden Dateien und Abschnitte definieren deine Identität, dein Wissen über den Nutzer, dein Gedächtnis, deine Skills und das Artefakt-Design. Halte dich an sie.`;

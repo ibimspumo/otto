@@ -25,6 +25,8 @@ export interface Settings {
   yolo_mode: boolean;
   memory_enabled: boolean;
   memory_model: string;
+  /** Remote-MCP-Server (eine Zeile pro Server: "label https://…" oder URL). */
+  mcp_servers: string;
   session_retention_days: number;
   vad_threshold: number;
 }
@@ -75,7 +77,9 @@ export interface CliJob {
   startedAt?: number;
 }
 
-export type ArtifactKind = "markdown" | "code" | "search" | "image";
+export type ArtifactKind = "markdown" | "code" | "search" | "image" | "job";
+
+export type JobStatus = "running" | "done" | "error" | "cancelled";
 
 export interface ImageMeta {
   id: string;
@@ -109,6 +113,10 @@ export interface SearchResult {
   description: string;
   age?: string | null;
   host?: string | null;
+  /** Vorschaubild (News/Bilder/Videos-Suche). */
+  thumbnail?: string | null;
+  /** Videolänge (nur Videos-Suche). */
+  duration?: string | null;
 }
 
 export interface Artifact {
@@ -120,6 +128,13 @@ export interface Artifact {
   results?: SearchResult[];
   imageIds?: string[];
   updatedAt: number;
+  /** Gläserne Jobs: Live-Terminal eines Hintergrund-Jobs als Artefakt. */
+  jobId?: string;
+  jobAgent?: string;
+  jobStatus?: JobStatus;
+  /** Letzte Output-Zeilen (Ringpuffer) für Mini- und Vollansicht. */
+  jobLines?: string[];
+  exitCode?: number | null;
 }
 
 export interface TranscriptItem {

@@ -38,26 +38,60 @@ Regeln:
 - Persona-Dateien (SOUL.md) fasst du NIE an.
 - Antworte ausschließlich mit JSON: {"memory_md": "…", "user_md": "…"} — keine Erklärungen, kein Markdown-Codeblock.`;
 
+export const DEFAULT_MEMORY_MODEL = "google/gemini-3.1-flash-lite";
+
+/** Modelle mit "/" laufen über OpenRouter, alle anderen über OpenAI. */
+function memoryModel(settings: Settings): string {
+  return settings.memory_model?.trim() || DEFAULT_MEMORY_MODEL;
+}
+
+function usesOpenRouter(settings: Settings): boolean {
+  return memoryModel(settings).includes("/");
+}
+
+/** Passender API-Key für das gewählte Memory-Modell (leer = nicht konfiguriert). */
+export function memoryApiKey(settings: Settings): string {
+  return usesOpenRouter(settings)
+    ? settings.openrouter_api_key.trim()
+    : settings.openai_api_key.trim();
+}
+
 async function chatCompletion(
   settings: Settings,
   system: string,
   user: string,
   maxTokens: number,
 ): Promise<string> {
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+  const model = memoryModel(settings);
+  const openrouter = usesOpenRouter(settings);
+  const url = openrouter
+    ? "https://openrouter.ai/api/v1/chat/completions"
+    : "https://api.openai.com/v1/chat/completions";
+  const body: Record<string, unknown> = {
+    model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    max_completion_tokens: maxTokens,
+  };
+  // OpenAI-Reasoning-Modelle (gpt-5*, o*) verbrauchen das Token-Budget sonst
+  // fürs Denken und liefern leeren Content — genau der Bug, der den Flush
+  // monatelang stumm hat scheitern lassen.
+  if (!openrouter && /^(gpt-5|o\d)/.test(model)) {
+    body.reasoning_effort = "low";
+  }
+  const resp = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${settings.openai_api_key.trim()}`,
+      Authorization: `Bearer ${memoryApiKey(settings)}`,
       "Content-Type": "application/json",
+      ...(openrouter
+        ? { "HTTP-Referer": "https://github.com/agentz/otto", "X-Title": "Otto" }
+        : {}),
     },
-    body: JSON.stringify({
-      model: settings.memory_model?.trim() || "gpt-5-mini",
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      max_completion_tokens: maxTokens,
-    }),
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90_000),
   });
   const json = await resp.json().catch(() => null);
   if (!resp.ok) {
@@ -65,7 +99,18 @@ async function chatCompletion(
       json?.error?.message ?? `Memory-Call fehlgeschlagen (HTTP ${resp.status})`,
     );
   }
-  return String(json?.choices?.[0]?.message?.content ?? "").trim();
+  const choice = json?.choices?.[0];
+  const content = String(choice?.message?.content ?? "").trim();
+  // Leere Antworten sind ein Fehler, kein "nichts Merkenswertes" — sonst
+  // werden Sessions als verarbeitet markiert und die Fakten sind weg.
+  if (!content) {
+    throw new Error(
+      `Memory-Call lieferte leeren Content (model=${model}, finish_reason=${String(
+        choice?.finish_reason ?? "?",
+      )})`,
+    );
+  }
+  return content;
 }
 
 function transcriptToText(items: { role: string; text: string }[]): string {
@@ -86,10 +131,9 @@ async function flushTranscript(
   date?: string,
 ): Promise<boolean> {
   if (transcript.trim().length < 80) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  const system = FLUSH_SYSTEM.replace("{DATE}", date ?? today);
-  const result = await chatCompletion(settings, system, transcript, 900);
-  if (!result || result === "NO_REPLY" || result.includes("NO_REPLY")) {
+  const system = FLUSH_SYSTEM.replace("{DATE}", date ?? localDate());
+  const result = await chatCompletion(settings, system, transcript, 1500);
+  if (result === "NO_REPLY" || result.includes("NO_REPLY")) {
     return false;
   }
   await api.memoryNoteAppend(result, date);
@@ -102,7 +146,7 @@ export async function flushSession(
   sessionId: number | null,
   items: TranscriptItem[],
 ): Promise<void> {
-  if (!settings.memory_enabled || !settings.openai_api_key.trim()) return;
+  if (!settings.memory_enabled || !memoryApiKey(settings)) return;
   const finals = items.filter((t) => t.final && t.text.trim());
   if (finals.length < 2) {
     // Nichts Substanzielles — Session trotzdem als verarbeitet markieren.
@@ -119,8 +163,16 @@ export async function flushSession(
   }
 }
 
+/** Datum in LOKALER Zeit (toISOString wäre UTC — nach Mitternacht falscher Tag). */
+function localDate(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function msToDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+  return localDate(new Date(ms));
 }
 
 export interface DreamingReport {
@@ -138,7 +190,7 @@ export async function runDreaming(
   onStatus?: (text: string) => void,
 ): Promise<DreamingReport> {
   const report: DreamingReport = { flushed: 0, consolidated: false, cleaned: 0 };
-  if (!settings.memory_enabled || !settings.openai_api_key.trim()) return report;
+  if (!settings.memory_enabled || !memoryApiKey(settings)) return report;
 
   // 1) Verpasste Memory-Flushes nachholen (Sessions, die ohne Flush
   //    endeten — App-Absturz, offline, …).

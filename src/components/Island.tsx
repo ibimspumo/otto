@@ -7,7 +7,8 @@ import Orb3D from "./Orb3D";
 interface IslandProps {
   state: AgentState;
   error: string | null;
-  activities: string[];
+  /** Was Otto GERADE tut — von App.tsx aktiv gepflegt und gelöscht. */
+  activity: string | null;
   jobs: CliJob[];
   onCancelJob: (id: string) => void;
   levels: React.MutableRefObject<{ inp: number; out: number }>;
@@ -42,7 +43,7 @@ const STATE_LABEL: Record<AgentState, string> = {
 export default function Island({
   state,
   error,
-  activities,
+  activity,
   jobs,
   onCancelJob,
   levels,
@@ -60,18 +61,20 @@ export default function Island({
   const [hovered, setHovered] = useState(false);
   const connected = state !== "disconnected" && state !== "connecting";
 
-  // Eine Zeile Wahrheit: Fehler > Verbinden > laufende Arbeit > Jobs.
+  // Eine Zeile Wahrheit: Fehler > Verbinden > aktuelle Tätigkeit > Denken > Jobs.
+  // `activity` ist nie veraltet — App.tsx löscht sie beim Ende jeder Aktion.
   const caption = useMemo(() => {
     if (error) return error;
     if (state === "connecting") return "verbinde…";
-    if (state === "thinking") return activities[0] ?? "denkt nach…";
+    if (activity) return activity;
+    if (state === "thinking") return "denkt nach…";
     if (jobs.length > 0 && !hovered) {
       return jobs.length === 1
         ? `${jobs[0].agent} arbeitet im Hintergrund…`
         : `${jobs.length} Jobs laufen im Hintergrund…`;
     }
     return null;
-  }, [error, state, activities, jobs, hovered]);
+  }, [error, state, activity, jobs, hovered]);
 
   const wide = hovered || caption !== null;
 
@@ -116,6 +119,7 @@ export default function Island({
               </div>
             ) : caption ? (
               <span
+                key={caption}
                 className={`island-caption ${error ? "error" : ""}`}
                 aria-live="polite"
               >

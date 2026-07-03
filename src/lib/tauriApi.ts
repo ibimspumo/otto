@@ -86,11 +86,17 @@ export const wakeWordStart = (phrases: string[]) =>
 
 export const wakeWordStop = () => invoke<void>("wake_word_stop");
 
-export const braveSearch = (query: string, apiKey: string, count?: number) =>
-  invoke<{ query: string; results: SearchResult[] }>("brave_search", {
+export const braveSearch = (
+  query: string,
+  apiKey: string,
+  count?: number,
+  searchType?: string,
+) =>
+  invoke<{ query: string; type: string; results: SearchResult[] }>("brave_search", {
     query,
     apiKey,
     count,
+    searchType,
   });
 
 // --- Session-Persistenz (SQLite + FTS5) ---
@@ -114,6 +120,36 @@ export const sessionMarkProcessed = (sessionId: number) =>
 
 export const sessionsCleanup = (days: number) =>
   invoke<number>("sessions_cleanup", { days });
+
+/** Sauberes App-Ende (killt Job-Prozessgruppen) — nur nach Teardown+Flush rufen. */
+export const appExit = () => invoke<void>("app_exit");
+
+// --- Hot Corner (Maus unten links weckt den Drop-Stapel) ---
+
+export const hotCornerStart = () => invoke<void>("hot_corner_start");
+export const hotCornerStop = () => invoke<void>("hot_corner_stop");
+
+// --- Bildschirm-Kontext (Otto sieht, wo der Nutzer gerade ist) ---
+
+export interface ScreenContext {
+  app_name: string | null;
+  bundle_id: string | null;
+  window_title: string | null;
+  selected_text: string | null;
+  mouse: [number, number] | null;
+  mouse_display: number | null;
+  display_count: number;
+  accessibility: boolean;
+}
+
+export const screenContext = () => invoke<ScreenContext>("screen_context");
+
+export const clipboardImage = () =>
+  invoke<{ b64: string; format: string } | null>("clipboard_image");
+
+/** Lokale Datei als Base64 (max. 25 MB) — für Dokument-Input. */
+export const fileReadB64 = (path: string) =>
+  invoke<string>("file_read_b64", { path });
 
 // --- Gedächtnis (Tagesnotizen + Konsolidierungs-State) ---
 

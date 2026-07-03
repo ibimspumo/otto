@@ -1,5 +1,6 @@
 mod agent_files;
 mod cli;
+mod context;
 mod diagnostics;
 mod fs_util;
 mod images;
@@ -17,6 +18,15 @@ mod wake;
 mod window_effects;
 
 use tauri::Manager;
+
+/// Sauberes App-Ende: Das Frontend ruft dies NACH Disconnect + Memory-Flush
+/// auf (Tray-Quit sendet erst "app-quit" und wartet). Laufende Job-
+/// Prozessgruppen werden mitgenommen, damit keine Waisen überleben.
+#[tauri::command]
+fn app_exit(app: tauri::AppHandle) {
+    cli::kill_all_jobs();
+    app.exit(0);
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,6 +50,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             tray::setup(app.handle())?;
+            // Mitgelieferte Mac-Steuerungs-Skills anlegen (nur wenn fehlend).
+            skills::seed_default_skills(app.handle());
             // App-Identität & TCC-Vorprüfung protokollieren — macht spätere
             // Freigabe-Probleme (Translocation, Dev-Binary) nachvollziehbar.
             diagnostics::log_startup(app.handle());
@@ -83,6 +95,11 @@ pub fn run() {
             native::top_inset,
             native::dblcmd_start,
             native::dblcmd_stop,
+            native::hot_corner_start,
+            native::hot_corner_stop,
+            context::screen_context,
+            context::clipboard_image,
+            context::file_read_b64,
             cli::cli_job_start,
             cli::cli_job_cancel,
             cli::cli_available,
@@ -111,7 +128,8 @@ pub fn run() {
             images::image_rename,
             images::image_favorite,
             images::image_export,
-            images::image_import
+            images::image_import,
+            app_exit
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

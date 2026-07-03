@@ -125,10 +125,13 @@ pub fn sessions_search(
     query: String,
     limit: Option<u32>,
 ) -> Result<Vec<SearchHit>, String> {
+    // Erst filtern, dann zitieren — sonst misst der Filter die Anführungs-
+    // zeichen mit und lässt auch Ein-Zeichen-Terme durch.
     let terms: Vec<String> = query
         .split_whitespace()
-        .map(|t| format!("\"{}\"", t.replace('"', "")))
-        .filter(|t| t.len() > 2)
+        .map(|t| t.replace('"', ""))
+        .filter(|t| t.chars().count() > 2)
+        .map(|t| format!("\"{t}\""))
         .collect();
     if terms.is_empty() {
         return Ok(vec![]);

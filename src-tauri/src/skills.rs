@@ -31,6 +31,43 @@ fn skills_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+// Mitgelieferte Grundfähigkeiten (Mac-Steuerung über Bordmittel).
+// Wie die Agent-Dateien: nur geseedet, wenn die Datei fehlt — vom Nutzer
+// bearbeitete oder gelöschte Skills werden nie überschrieben. Gelöschte
+// bleiben gelöscht, weil delete_skill eine leere Tombstone-Datei NICHT
+// hinterlässt — bewusst simpel: Wer einen Default-Skill löscht, bekommt
+// ihn beim nächsten Start wieder; dauerhaft loswerden = Inhalt ersetzen.
+const DEFAULT_SKILLS: &[(&str, &str)] = &[
+    (
+        "mac-kalender-erinnerungen",
+        include_str!("../defaults/skills/mac-kalender-erinnerungen.md"),
+    ),
+    ("mac-musik", include_str!("../defaults/skills/mac-musik.md")),
+    (
+        "mac-dateisuche",
+        include_str!("../defaults/skills/mac-dateisuche.md"),
+    ),
+    (
+        "mac-mail-notizen",
+        include_str!("../defaults/skills/mac-mail-notizen.md"),
+    ),
+    (
+        "mac-shortcuts",
+        include_str!("../defaults/skills/mac-shortcuts.md"),
+    ),
+];
+
+/// Beim App-Start aufrufen: fehlende Default-Skills anlegen.
+pub fn seed_default_skills(app: &tauri::AppHandle) {
+    let Ok(dir) = skills_dir(app) else { return };
+    for (name, content) in DEFAULT_SKILLS {
+        let path = dir.join(format!("{name}.md"));
+        if !path.exists() {
+            let _ = write_private(&path, content);
+        }
+    }
+}
+
 fn validate_name(name: &str) -> Result<(), String> {
     let ok = !name.is_empty()
         && name.len() <= 64

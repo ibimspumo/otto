@@ -75,7 +75,17 @@ pub fn setup(app: &tauri::AppHandle) -> tauri::Result<()> {
                 let _ = app.emit("tray-files", ());
             }
             "quit" => {
-                app.exit(0);
+                // Kein hartes exit: Das Frontend bekommt die Chance, sauber
+                // zu trennen (session_end + Memory-Flush) und ruft dann
+                // app_exit auf. Fallback-Thread, falls das Frontend hängt
+                // oder kein Fenster mehr lebt.
+                let _ = app.emit("app-quit", ());
+                let handle = app.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(8));
+                    crate::cli::kill_all_jobs();
+                    handle.exit(0);
+                });
             }
             _ => {}
         })

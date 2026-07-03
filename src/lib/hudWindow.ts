@@ -258,6 +258,37 @@ export async function layoutQuickLook(
   }
 }
 
+// Der Leucht-Tab: schmaler Streifen an der linken Kante, wenn der Stapel
+// sich zurückgezogen hat. Licht statt Fläche — und bewusst ein winziges
+// Fenster, damit keine unsichtbare Fläche Klicks frisst.
+export const TAB_W = 16;
+export const TAB_H = 96;
+
+/** Zurückgezogener Modus: winziges Fenster bündig an der linken Kante. */
+export async function layoutEdgeTab(): Promise<void> {
+  try {
+    const panel = await panelWindow();
+    const monitor = await activeMonitor();
+    if (!panel || !monitor) return;
+    const sf = monitor.scaleFactor;
+    const area = workArea(monitor);
+    await invoke("panel_vibrancy", { enable: false, radius: 0 }).catch(() => {});
+    await panel.setShadow(false).catch(() => {});
+    await panel.setSize(
+      new PhysicalSize(Math.round(TAB_W * sf), Math.round(TAB_H * sf)),
+    );
+    await panel.setPosition(
+      new PhysicalPosition(
+        Math.round(area.x * sf),
+        Math.round((area.bottom - TAB_H) * sf),
+      ),
+    );
+    await panel.setAlwaysOnTop(true);
+  } catch {
+    // Ignorieren.
+  }
+}
+
 export async function showDrops(): Promise<void> {
   try {
     const panel = await panelWindow();

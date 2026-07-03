@@ -24,11 +24,21 @@ const BLOCKED_TOKENS: &[&str] = &[
     "osascript",
 ];
 
+// AppleScript ist nur für konkrete System-Apps zugelassen — jede davon
+// verlangt zusätzlich ihre eigene macOS-Automation-Freigabe („Otto möchte
+// Kalender steuern“), die der Nutzer einmalig bestätigt. Freie
+// System-Events-/Finder-Automation bleibt bewusst draußen.
 const ALLOWED_OSASCRIPT_SNIPPETS: &[&str] = &[
     "tell application \"Spotify\"",
     "tell application \"Music\"",
+    "tell application \"Calendar\"",
+    "tell application \"Reminders\"",
+    "tell application \"Notes\"",
+    "tell application \"Mail\"",
+    "tell application \"Safari\"",
     "set volume",
     "output volume",
+    "display notification",
 ];
 
 fn has_shell_metachar_pipeline(command: &str) -> bool {

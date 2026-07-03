@@ -324,7 +324,7 @@ export function MemorySettings({ form, set }: SectionProps) {
       </Row>
       <Row
         label="Gedächtnis-Modell"
-        hint="Chat-Modell für Extraktion und Konsolidierung. Standard: gpt-5-mini."
+        hint="Chat-Modell für Extraktion und Konsolidierung. Mit Schrägstrich (z. B. google/gemini-3.1-flash-lite) läuft es über OpenRouter, sonst über OpenAI. Standard: google/gemini-3.1-flash-lite."
       >
         <input
           type="text"
@@ -509,6 +509,27 @@ export function CapabilitySettings({
             disabled={!form.cli_enabled}
             placeholder="z. B.: Claude für Design- und Frontend-Aufgaben, Codex für Programmier- und Systemaufgaben."
             onChange={(e) => set({ cli_notes: e.target.value })}
+          />
+        </Row>
+      </Group>
+      <Group title="MCP-Server">
+        <Row
+          wide
+          label="Remote-MCP-Server"
+          hint={
+            <>
+              Eine Zeile pro Server: <code>label https://…</code> oder nur die URL.
+              Die Realtime-API führt die Tools dieser Server selbst aus — Otto kann
+              damit z.&nbsp;B. Notion, GitHub oder Home Assistant steuern, ohne dass
+              dafür Code nötig ist. Gilt ab der nächsten Verbindung.
+            </>
+          }
+        >
+          <textarea
+            rows={3}
+            value={form.mcp_servers}
+            placeholder={"docs https://developers.openai.com/mcp\nhttps://mein-server.example/mcp"}
+            onChange={(e) => set({ mcp_servers: e.target.value })}
           />
         </Row>
       </Group>

@@ -61,6 +61,7 @@ export async function fetchImageModels(
     try {
       const resp = await fetch("https://openrouter.ai/api/v1/images/models", {
         headers: { Authorization: `Bearer ${openrouterKey.trim()}` },
+        signal: AbortSignal.timeout(20_000),
       });
       const json = await resp.json();
       const list: ImageModelInfo[] = (json?.data ?? [])
@@ -162,54 +163,74 @@ export async function generateImage(
   };
   if (opts.transparent) body.background = "transparent";
 
-  const resp = await fetch("https://api.openai.com/v1/images/generations", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  // Inaktivitäts-Watchdog statt Gesamt-Timeout: Der SSE-Stream darf lange
+  // laufen, aber nie STILL hängen — sonst klebt Tool, Antwort und Caption
+  // für immer (der Kern des "Insel zeigt Veraltetes"-Bugs).
+  const controller = new AbortController();
+  let lastData = Date.now();
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastData > 90_000) controller.abort();
+  }, 5_000);
 
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => null);
-    throw new Error(err?.error?.message ?? `Bildgenerierung fehlgeschlagen (HTTP ${resp.status})`);
-  }
+  try {
+    const resp = await fetch("https://api.openai.com/v1/images/generations", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
 
-  const reader = resp.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let finalB64: string | null = null;
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => null);
+      throw new Error(err?.error?.message ?? `Bildgenerierung fehlgeschlagen (HTTP ${resp.status})`);
+    }
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const payload = trimmed.slice(5).trim();
-      if (payload === "[DONE]") continue;
-      let event: StreamEvent;
-      try {
-        event = JSON.parse(payload);
-      } catch {
-        continue;
-      }
-      if (event.type === "image_generation.partial_image" && event.b64_json) {
-        onPartial(event.b64_json);
-      } else if (event.type === "image_generation.completed" && event.b64_json) {
-        finalB64 = event.b64_json;
-      } else if (event.type === "error") {
-        throw new Error(event.error?.message ?? "Bildgenerierung fehlgeschlagen.");
+    const reader = resp.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalB64: string | null = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      lastData = Date.now();
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        let event: StreamEvent;
+        try {
+          event = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+        if (event.type === "image_generation.partial_image" && event.b64_json) {
+          onPartial(event.b64_json);
+        } else if (event.type === "image_generation.completed" && event.b64_json) {
+          finalB64 = event.b64_json;
+        } else if (event.type === "error") {
+          throw new Error(event.error?.message ?? "Bildgenerierung fehlgeschlagen.");
+        }
       }
     }
-  }
 
-  if (!finalB64) throw new Error("Kein Bild empfangen.");
-  return finalB64;
+    if (!finalB64) throw new Error("Kein Bild empfangen.");
+    return finalB64;
+  } catch (e) {
+    if (controller.signal.aborted) {
+      throw new Error("Bildgenerierung abgebrochen: keine Daten vom Server (Timeout).");
+    }
+    throw e;
+  } finally {
+    clearInterval(watchdog);
+  }
 }
 
 function blobFromB64(b64: string): Blob {
@@ -263,6 +284,7 @@ export async function generateImagesOpenRouter(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(300_000),
   });
   const json = await resp.json().catch(() => null);
   if (!resp.ok) {
@@ -303,6 +325,7 @@ export async function editImages(
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
+    signal: AbortSignal.timeout(300_000),
   });
 
   const json = await resp.json().catch(() => null);

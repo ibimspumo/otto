@@ -12,19 +12,55 @@ fn strip_tags(input: &str) -> String {
     out
 }
 
+/// Ein Brave-Treffer, auf ein gemeinsames Format normalisiert — egal ob
+/// Web, News, Bilder oder Videos.
+fn normalize_result(r: &serde_json::Value, search_type: &str) -> serde_json::Value {
+    let get = |p: &str| r.pointer(p).and_then(|v| v.as_str()).unwrap_or("");
+    let thumbnail = r
+        .pointer("/thumbnail/src")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
+    let description = match search_type {
+        // Bild-Treffer haben keine Beschreibung; Videos tragen sie unter /description.
+        "images" => String::new(),
+        _ => strip_tags(get("/description")),
+    };
+    serde_json::json!({
+        "title": strip_tags(get("/title")),
+        "url": get("/url"),
+        "description": description,
+        "age": r.pointer("/age").and_then(|v| v.as_str()),
+        "host": r.pointer("/meta_url/hostname").and_then(|v| v.as_str()),
+        "thumbnail": thumbnail,
+        "duration": r.pointer("/video/duration").and_then(|v| v.as_str()),
+    })
+}
+
 #[tauri::command]
 pub async fn brave_search(
     query: String,
     api_key: String,
     count: Option<u32>,
+    search_type: Option<String>,
 ) -> Result<serde_json::Value, String> {
     if api_key.trim().is_empty() {
         return Err("Kein Brave-API-Key hinterlegt.".into());
     }
     let count = count.unwrap_or(6).clamp(1, 20);
-    let client = reqwest::Client::new();
+    let search_type = match search_type.as_deref() {
+        Some("news") => "news",
+        Some("images") | Some("bilder") => "images",
+        Some("videos") => "videos",
+        _ => "web",
+    };
+    let endpoint = format!("https://api.search.brave.com/res/v1/{search_type}/search");
+    // Ohne Timeout kann ein hängender Request Tool + Antwort einfrieren.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
     let resp = client
-        .get("https://api.search.brave.com/res/v1/web/search")
+        .get(&endpoint)
         .query(&[("q", query.as_str()), ("count", &count.to_string())])
         .header("X-Subscription-Token", api_key.trim())
         .header("Accept", "application/json")
@@ -46,18 +82,14 @@ pub async fn brave_search(
         return Err(format!("Brave API {status}: {detail}"));
     }
 
+    // Web-Suche verschachtelt die Treffer unter /web/results, die
+    // Spezial-Endpoints liefern sie direkt unter /results.
+    let items_path = if search_type == "web" { "/web/results" } else { "/results" };
     let mut results = Vec::new();
-    if let Some(items) = body.pointer("/web/results").and_then(|v| v.as_array()) {
+    if let Some(items) = body.pointer(items_path).and_then(|v| v.as_array()) {
         for r in items.iter().take(count as usize) {
-            let get = |p: &str| r.pointer(p).and_then(|v| v.as_str()).unwrap_or("");
-            results.push(serde_json::json!({
-                "title": strip_tags(get("/title")),
-                "url": get("/url"),
-                "description": strip_tags(get("/description")),
-                "age": r.pointer("/age").and_then(|v| v.as_str()),
-                "host": r.pointer("/meta_url/hostname").and_then(|v| v.as_str()),
-            }));
+            results.push(normalize_result(r, search_type));
         }
     }
-    Ok(serde_json::json!({ "query": query, "results": results }))
+    Ok(serde_json::json!({ "query": query, "type": search_type, "results": results }))
 }

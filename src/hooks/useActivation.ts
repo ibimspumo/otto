@@ -14,7 +14,7 @@ interface UseActivationArgs {
     userSpeaking: boolean;
     responseActive: boolean;
     playing: boolean;
-    toolRunning: boolean;
+    toolRunning: number;
   }>;
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
@@ -80,24 +80,30 @@ export function useActivation({
     };
   }, [summonAndConnect]);
 
+  // Bewusst NUR von den Hotkey-Feldern abhängig — hinge der Effekt am ganzen
+  // settings-Objekt, würde jeder Auto-Save (debounced bei jedem Tastendruck
+  // in den Einstellungen) den Hotkey ab- und neu registrieren: kurze
+  // Totzeiten und Races zwischen überlappenden Effekt-Läufen.
+  const hotkeyEnabled = settings?.hotkey_enabled ?? false;
+  const hotkeyCombo = settings ? (settings.hotkey?.trim() ?? "") : null;
   useEffect(() => {
-    if (!settings) return;
+    if (hotkeyCombo === null) return; // Settings noch nicht geladen
     let disposed = false;
     (async () => {
       await unregisterAll().catch(() => {});
       await api.dblcmdStop().catch(() => {});
-      const combo = settings.hotkey?.trim();
-      if (!settings.hotkey_enabled || !combo || disposed) return;
-      if (isDoubleCmd(combo)) {
+      if (!hotkeyEnabled || !hotkeyCombo || disposed) return;
+      if (isDoubleCmd(hotkeyCombo)) {
         await api.dblcmdStart().catch((e) => {
           setError(
             `Doppel-Cmd ließ sich nicht aktivieren: ${String(e)} — braucht die Bedienungshilfen-Freigabe.`,
           );
         });
+        if (disposed) await api.dblcmdStop().catch(() => {});
         return;
       }
       try {
-        await register(combo, (event) => {
+        await register(hotkeyCombo, (event) => {
           if (event.state !== "Pressed") return;
           if (flags.current.connected || flags.current.connecting) {
             void dismiss();
@@ -105,8 +111,9 @@ export function useActivation({
             void summonAndConnect();
           }
         });
+        if (disposed) await unregisterAll().catch(() => {});
       } catch (e) {
-        setError(`Hotkey „${combo}“ ließ sich nicht registrieren: ${String(e)}`);
+        setError(`Hotkey „${hotkeyCombo}“ ließ sich nicht registrieren: ${String(e)}`);
       }
     })();
     return () => {
@@ -114,7 +121,7 @@ export function useActivation({
       void unregisterAll().catch(() => {});
       void api.dblcmdStop().catch(() => {});
     };
-  }, [settings, settings?.hotkey, settings?.hotkey_enabled, flags, summonAndConnect, dismiss, setError]);
+  }, [hotkeyCombo, hotkeyEnabled, flags, summonAndConnect, dismiss, setError]);
 
   useEffect(() => {
     const un = listen("double-cmd", () => {

@@ -42,6 +42,8 @@
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-system: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Feder: leichtes Überschwingen für "Ankommen"-Momente. */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.44, 1);
   --dur-fast: 150ms;
   --dur-med: 240ms;
   --dur-slow: 380ms;
@@ -122,6 +124,14 @@ button {
 /* Die Insel — Kapsel am Notch, Zustand als Licht                      */
 /* ------------------------------------------------------------------ */
 
+/* Registrierte Custom Property: macht --light animierbar — der Glow
+   blendet beim Zustandswechsel weich über statt hart zu springen. */
+@property --light {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
 .island-stage {
   height: 100vh;
   display: flex;
@@ -131,6 +141,13 @@ button {
   overflow: hidden;
   /* Das eine farbige Element der ganzen UI. */
   --light: transparent;
+  transition: --light 420ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-stage {
+    transition: none;
+  }
 }
 
 .island-stage[data-state="connecting"] {
@@ -398,17 +415,26 @@ button {
   position: relative;
   width: 304px;
   border-radius: var(--radius-md);
-  background: var(--card);
+  /* Dasselbe Material wie die Insel: echtes Schwarz mit Haarlinie —
+     kein grauer Schleier. */
+  background: rgba(6, 6, 8, 0.94);
   border: 1px solid var(--hair-2);
   box-shadow: var(--shadow-card);
   cursor: zoom-in;
   overflow: hidden;
-  animation: drop-in var(--dur-slow) var(--ease-system);
+  animation: drop-in 520ms var(--ease-spring) backwards;
   transition:
     border-color var(--dur-fast) ease,
     transform 200ms var(--ease-system),
     background var(--dur-fast) ease;
 }
+
+/* Gestaffelter Aufbau: von unten (Hero, letztes Kind) nach oben. */
+.drops > .drop:nth-last-child(1) { animation-delay: 0ms; }
+.drops > .drop:nth-last-child(2) { animation-delay: 60ms; }
+.drops > .drop:nth-last-child(3) { animation-delay: 120ms; }
+.drops > .drop:nth-last-child(4) { animation-delay: 180ms; }
+.drops > .drop-chip { animation: drop-in 520ms var(--ease-spring) 240ms backwards; }
 
 .drop:hover {
   border-color: rgba(255, 255, 255, 0.26);
@@ -437,16 +463,30 @@ button {
   z-index: 2;
 }
 
+/* Einfliegen von der linken Kante mit Feder-Nachschwingen — wie das
+   macOS-Screenshot-Thumbnail, nur von links. */
 @keyframes drop-in {
-  from {
+  0% {
     opacity: 0;
-    transform: translateX(-18px) translateY(8px) scale(0.975);
-    filter: blur(8px);
+    transform: translateX(-72px) scale(0.96);
+    filter: blur(6px);
   }
-  to {
+  60% {
+    opacity: 1;
+    transform: translateX(4px) scale(1.004);
+    filter: none;
+  }
+  100% {
     opacity: 1;
     transform: none;
     filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop,
+  .drops > .drop-chip {
+    animation: none;
   }
 }
 
@@ -569,10 +609,53 @@ button {
   align-items: center;
   padding: 0 10px;
   border-radius: 999px;
-  background: var(--card);
+  background: rgba(6, 6, 8, 0.94);
   border: 1px solid var(--hair);
   font-size: 10.5px;
   color: var(--ink-3);
+}
+
+/* ------------------------------------------------------------------ */
+/* Der Leucht-Tab: zurückgezogener Stapel als Licht an der Kante        */
+/* ------------------------------------------------------------------ */
+
+.edge-tab {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.edge-tab-light {
+  width: 3px;
+  height: 64px;
+  border-radius: 0 3px 3px 0;
+  background: var(--violet);
+  box-shadow: 0 0 12px var(--violet);
+  animation: tab-breathe 3s ease-in-out infinite;
+}
+
+.edge-tab:hover .edge-tab-light {
+  width: 4px;
+  box-shadow: 0 0 18px var(--violet);
+}
+
+@keyframes tab-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edge-tab-light {
+    animation: none;
+    opacity: 0.8;
+  }
 }
 
 /* --- Miniaturen: jeder Typ echt gerendert ------------------------- */
@@ -677,6 +760,53 @@ button {
   vertical-align: -1px;
 }
 
+/* --- Gläserne Jobs: Mini-Terminal im Drop ------------------------- */
+
+.mini-term {
+  width: 100%;
+  height: 100%;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  overflow: hidden;
+  background: #000;
+  pointer-events: none;
+}
+
+.mini-term-line {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: term-line-in 220ms var(--ease-system);
+}
+
+.mini-term-line.dim {
+  color: var(--ink-3);
+}
+
+@keyframes term-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mini-term-line {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Quick Look — das Artefakt in Inhaltsgröße, auf echtem Glas          */
 /* ------------------------------------------------------------------ */
@@ -692,7 +822,8 @@ button {
   background: var(--glass-tint);
   border: 0;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  animation: ql-in 300ms var(--ease-system);
+  animation: ql-in 380ms var(--ease-system);
+  transform-origin: 12% 88%;
   isolation: isolate;
 }
 
@@ -732,16 +863,24 @@ button {
   animation: edge-life 2.4s ease-in-out infinite;
 }
 
+/* Quick Look wächst aus der Drop-Ecke unten links heran, statt aus dem
+   Nichts in der Mitte zu erscheinen — der Blick folgt dem Inhalt. */
 @keyframes ql-in {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.965);
+    transform: translate(-10vw, 12vh) scale(0.72);
     filter: blur(10px);
   }
   to {
     opacity: 1;
     transform: none;
     filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ql-shell {
+    animation: none;
   }
 }
 
@@ -752,6 +891,95 @@ button {
   }
   50% {
     opacity: 0.95;
+  }
+}
+
+/* --- Gläserne Jobs: Vollansicht im Quick Look ---------------------- */
+
+.job-term {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 52px 0 0;
+}
+
+.job-term-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px 10px;
+  min-width: 0;
+}
+
+.job-status {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--ink-2);
+}
+
+.job-status.running {
+  color: color-mix(in srgb, var(--violet) 85%, white);
+}
+
+.job-status.error {
+  color: var(--red);
+}
+
+.job-task {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.job-term-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.55);
+  border-top: 1px solid var(--hair);
+}
+
+.job-term-body {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  padding: 14px 18px 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  cursor: auto;
+}
+
+.job-term-life {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--violet), transparent);
+  background-size: 200% 100%;
+  animation: life 1.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-term-life {
+    animation: none;
+    background: var(--violet);
+    opacity: 0.5;
   }
 }
 
@@ -1053,6 +1281,54 @@ button {
   padding: 12px 0;
   border-bottom: 1px solid var(--hair);
   animation: result-in 260ms var(--ease-system) both;
+}
+
+/* Treffer mit Vorschaubild (News/Bilder/Videos-Suche) */
+.search-result.with-thumb {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.search-result-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-thumb {
+  position: relative;
+  flex: none;
+  width: 132px;
+  height: 84px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--hair);
+  cursor: pointer;
+}
+
+.search-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.search-thumb:hover img {
+  opacity: 0.85;
+}
+
+.search-duration {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  font-size: 9.5px;
+  font-family: var(--font-mono);
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 4px;
+  padding: 1px 5px;
 }
 
 .search-result:nth-of-type(2) { animation-delay: 35ms; }

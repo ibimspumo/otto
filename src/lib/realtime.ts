@@ -25,6 +25,11 @@ export interface RealtimeCallbacks {
   onFunctionCall: (call: FunctionCall) => void;
 }
 
+export interface McpServer {
+  label: string;
+  url: string;
+}
+
 interface SessionParams {
   model: string;
   voice: string;
@@ -33,6 +38,8 @@ interface SessionParams {
   reasoningEffort?: string;
   /** VAD-Schwelle 0.3–0.99 — höher = unempfindlicher gegen Nebengeräusche. */
   vadThreshold?: number;
+  /** Remote-MCP-Server — die Realtime API ruft deren Tools selbst auf. */
+  mcpServers?: McpServer[];
 }
 
 /**
@@ -122,7 +129,17 @@ export class RealtimeClient {
           voice: p.voice,
         },
       },
-      tools: p.tools,
+      tools: [
+        ...p.tools,
+        // MCP-Server: kein Executor-Code nötig — die API listet die Tools
+        // selbst und führt die Aufrufe serverseitig aus.
+        ...(p.mcpServers ?? []).map((s) => ({
+          type: "mcp",
+          server_label: s.label,
+          server_url: s.url,
+          require_approval: "never",
+        })),
+      ],
       tool_choice: "auto",
     };
     // Nur die Realtime-2-Modelle können Reasoning-Aufwand konfigurieren.
@@ -141,6 +158,22 @@ export class RealtimeClient {
     this.send({
       type: "conversation.item.create",
       item: { type: "function_call_output", call_id: callId, output },
+    });
+  }
+
+  /**
+   * Legt ein Bild in die Konversation (GA-Feature der Realtime API) —
+   * z. B. einen Screenshot aus der Zwischenablage. Optional mit Text
+   * im selben Item, damit das Modell weiß, worauf es schauen soll.
+   */
+  sendImage(dataUrl: string, text?: string): void {
+    const content: Record<string, unknown>[] = [
+      { type: "input_image", image_url: dataUrl, detail: "high" },
+    ];
+    if (text) content.push({ type: "input_text", text });
+    this.send({
+      type: "conversation.item.create",
+      item: { type: "message", role: "user", content },
     });
   }
 

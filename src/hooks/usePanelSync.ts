@@ -34,6 +34,25 @@ interface UsePanelSyncArgs {
   reloadArtifactStyle: () => void;
 }
 
+/** Nur die Bilder, die von Artefakten referenziert werden (Payload-Diät). */
+function visibleImages(
+  artifacts: Artifact[],
+  images: Record<string, ImageState>,
+): Record<string, ImageState> {
+  const used: Record<string, ImageState> = {};
+  for (const a of artifacts) {
+    for (const id of a.imageIds ?? []) {
+      if (images[id]) used[id] = images[id];
+    }
+    if (a.kind === "markdown" && a.content.includes("otto-image:")) {
+      for (const [id, st] of Object.entries(images)) {
+        if (a.content.includes(`otto-image:${id}`)) used[id] = st;
+      }
+    }
+  }
+  return used;
+}
+
 export function usePanelSync({
   panelOpen,
   setPanelOpen,
@@ -69,10 +88,12 @@ export function usePanelSync({
   }, [panelOpen, pendingPresent]);
 
   useEffect(() => {
+    // Nur referenzierte Bilder spiegeln — sonst wächst jedes panel-state-
+    // Event während der Generierung (data:-URLs!) auf Megabyte-Größe.
     void emit("panel-state", {
       artifacts,
       activeId: activeArtifactId,
-      images,
+      images: visibleImages(artifacts, images),
       artifactStyle,
     });
   }, [artifacts, activeArtifactId, images, artifactStyle]);
@@ -82,7 +103,7 @@ export function usePanelSync({
       void emit("panel-state", {
         artifacts: artifactsRef.current,
         activeId: activeArtifactIdRef.current,
-        images: imagesRef.current,
+        images: visibleImages(artifactsRef.current, imagesRef.current),
         artifactStyle: artifactStyleRef.current,
       });
     });

@@ -84,6 +84,16 @@ fn kill_group(pid: i32, signal: i32) {
     }
 }
 
+/// Beim App-Ende alle laufenden Job-Prozessgruppen mitnehmen — sonst
+/// überleben Codex/Claude/Shell-Kinder als Waisen.
+pub fn kill_all_jobs() {
+    if let Ok(map) = jobs().lock() {
+        for pid in map.values() {
+            kill_group(*pid, libc::SIGKILL);
+        }
+    }
+}
+
 #[tauri::command]
 pub fn cli_job_start(
     app: tauri::AppHandle,

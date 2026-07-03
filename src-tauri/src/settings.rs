@@ -31,6 +31,10 @@ pub struct Settings {
     pub yolo_mode: bool,
     pub memory_enabled: bool,
     pub memory_model: String,
+    /// Remote-MCP-Server für die Realtime-Session, eine Zeile pro Server:
+    /// `label https://…` oder nur die URL. Die Realtime API ruft die Tools
+    /// dieser Server selbst auf — kein Executor-Code in Otto nötig.
+    pub mcp_servers: String,
     pub session_retention_days: u32,
     /// VAD-Schwelle (0.5–0.95): höher = unempfindlicher gegen
     /// Hintergrundgeräusche (Fernseher, Ventilator).
@@ -57,7 +61,8 @@ impl Default for Settings {
             cli_notes: String::new(),
             yolo_mode: false,
             memory_enabled: true,
-            memory_model: "gpt-5-mini".into(),
+            memory_model: "google/gemini-3.1-flash-lite".into(),
+            mcp_servers: String::new(),
             session_retention_days: 30,
             vad_threshold: 0.85,
         }
@@ -197,8 +202,10 @@ fn normalize_settings(settings: &mut Settings) {
     if settings.cli_default.trim().is_empty() {
         settings.cli_default = "codex".into();
     }
-    if settings.memory_model.trim().is_empty() {
-        settings.memory_model = "gpt-5-mini".into();
+    // Migration: "gpt-5-mini" war der alte Default und hat als Reasoning-Modell
+    // mit knappem Token-Budget stumm leere Flushes produziert.
+    if settings.memory_model.trim().is_empty() || settings.memory_model.trim() == "gpt-5-mini" {
+        settings.memory_model = "google/gemini-3.1-flash-lite".into();
     }
     if settings.session_retention_days == 0 {
         settings.session_retention_days = 30;

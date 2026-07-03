@@ -32,10 +32,32 @@ pub async fn run_terminal(
             .map_err(|e| format!("Start fehlgeschlagen: {e}"))?;
         let pid = child.id() as i32;
 
+        // Pipes SOFORT in eigenen Threads leeren: Ein Kind, das mehr als
+        // ~64 KB schreibt, blockiert sonst am vollen Pipe-Puffer und läuft
+        // zwangsläufig in den Timeout (Deadlock).
+        let stdout_pipe = child.stdout.take();
+        let stderr_pipe = child.stderr.take();
+        let stdout_thread = std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            if let Some(mut p) = stdout_pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        });
+        let stderr_thread = std::thread::spawn(move || {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            if let Some(mut p) = stderr_pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        });
+
         let deadline = std::time::Instant::now() + timeout;
-        loop {
+        let status = loop {
             match child.try_wait() {
-                Ok(Some(_)) => break,
+                Ok(Some(status)) => break status,
                 Ok(None) => {
                     if std::time::Instant::now() >= deadline {
                         unsafe {
@@ -51,12 +73,13 @@ pub async fn run_terminal(
                 }
                 Err(e) => return Err(e.to_string()),
             }
-        }
-        let output = child.wait_with_output().map_err(|e| e.to_string())?;
+        };
+        let stdout = stdout_thread.join().unwrap_or_default();
+        let stderr = stderr_thread.join().unwrap_or_default();
         Ok(serde_json::json!({
-            "exit_code": output.status.code(),
-            "stdout": truncate_output(&String::from_utf8_lossy(&output.stdout), 8000),
-            "stderr": truncate_output(&String::from_utf8_lossy(&output.stderr), 4000),
+            "exit_code": status.code(),
+            "stdout": truncate_output(&String::from_utf8_lossy(&stdout), 8000),
+            "stderr": truncate_output(&String::from_utf8_lossy(&stderr), 4000),
         }))
     })
     .await

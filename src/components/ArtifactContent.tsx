@@ -190,24 +190,36 @@ export function SearchResults({ artifact }: { artifact: Artifact }) {
       {(artifact.results ?? []).map((r, i) => {
         const host = r.host || safeHost(r.url);
         return (
-          <div className="search-result" key={i}>
-            <div className="src">
-              <Favicon host={host} />
-              <span>{host}</span>
-              {r.age && <span className="age">{r.age}</span>}
-            </div>
-            <h3>
-              <a
-                href={r.url}
-                onClick={(e) => {
-                  e.preventDefault();
-                  openUrl(r.url).catch(() => {});
-                }}
+          <div className={`search-result ${r.thumbnail ? "with-thumb" : ""}`} key={i}>
+            {r.thumbnail && (
+              <button
+                className="search-thumb"
+                onClick={() => openUrl(r.url).catch(() => {})}
+                aria-label={`${r.title} öffnen`}
               >
-                {r.title}
-              </a>
-            </h3>
-            <p>{r.description}</p>
+                <img src={r.thumbnail} alt="" loading="lazy" />
+                {r.duration && <span className="search-duration">{r.duration}</span>}
+              </button>
+            )}
+            <div className="search-result-body">
+              <div className="src">
+                <Favicon host={host} />
+                <span>{host}</span>
+                {r.age && <span className="age">{r.age}</span>}
+              </div>
+              <h3>
+                <a
+                  href={r.url}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openUrl(r.url).catch(() => {});
+                  }}
+                >
+                  {r.title}
+                </a>
+              </h3>
+              {r.description && <p>{r.description}</p>}
+            </div>
           </div>
         );
       })}
@@ -371,5 +383,59 @@ export function ArtifactBody({
           <SearchResults artifact={artifact} />
         </div>
       );
+    case "job":
+      return <JobTerminal artifact={artifact} />;
   }
+}
+
+const JOB_STATUS_LABEL: Record<string, string> = {
+  running: "läuft",
+  done: "fertig",
+  error: "fehlgeschlagen",
+  cancelled: "abgebrochen",
+};
+
+/**
+ * Gläserner Job: das Live-Terminal eines Hintergrund-Jobs in voller
+ * Größe — Scrollback klebt am Ende, solange der Nutzer nicht selbst
+ * hochgescrollt hat.
+ */
+function JobTerminal({ artifact }: { artifact: Artifact }) {
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const pinned = useRef(true);
+  const lines = artifact.jobLines ?? [];
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && pinned.current) el.scrollTop = el.scrollHeight;
+  }, [lines.length, artifact.jobStatus]);
+
+  return (
+    <div className="job-term">
+      <div className="job-term-meta">
+        <span className={`job-status ${artifact.jobStatus ?? "running"}`}>
+          {JOB_STATUS_LABEL[artifact.jobStatus ?? "running"]}
+          {artifact.jobStatus !== "running" && artifact.exitCode != null
+            ? ` · Exit ${artifact.exitCode}`
+            : ""}
+        </span>
+        <span className="job-task" title={artifact.content}>
+          {artifact.content}
+        </span>
+      </div>
+      <div
+        className="job-term-scroll"
+        ref={scroller}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        }}
+      >
+        <pre className="job-term-body">
+          {lines.length > 0 ? lines.join("\n") : "— noch keine Ausgabe —"}
+        </pre>
+      </div>
+      {artifact.jobStatus === "running" && <div className="job-term-life" aria-hidden />}
+    </div>
+  );
 }

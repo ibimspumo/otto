@@ -31,7 +31,7 @@ thread_local! {
     static MONITORS: RefCell<Vec<Retained<AnyObject>>> = const { RefCell::new(Vec::new()) };
 }
 
-fn on_main<T: Send + 'static>(
+pub(crate) fn on_main<T: Send + 'static>(
     app: &tauri::AppHandle,
     f: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, String> {
@@ -145,4 +145,121 @@ pub fn dblcmd_start(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn dblcmd_stop(app: tauri::AppHandle) -> Result<(), String> {
     on_main(&app, dbl_stop_on_main)
+}
+
+// ------------------------------------------------------------------
+// Hot Corner: Maus in der Ecke unten links weckt den Drop-Stapel.
+//
+// Komplett permission-frei: CGEventCreate/CGEventGetLocation lesen die
+// Cursor-Position ohne TCC (geschützt ist nur das ABHÖREN von Events),
+// CGDisplayBounds liefert die Display-Rechtecke im selben globalen
+// Punkt-Koordinatensystem (Ursprung oben links am Hauptdisplay) —
+// multi-monitor-sicher ohne Umrechnungs-Akrobatik im Frontend.
+// ------------------------------------------------------------------
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct CGPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct CGSize {
+    pub width: f64,
+    pub height: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct CGRect {
+    pub origin: CGPoint,
+    pub size: CGSize,
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventCreate(source: *const std::ffi::c_void) -> *const std::ffi::c_void;
+    fn CGEventGetLocation(event: *const std::ffi::c_void) -> CGPoint;
+    fn CGGetActiveDisplayList(max: u32, ids: *mut u32, count: *mut u32) -> i32;
+    fn CGDisplayBounds(display: u32) -> CGRect;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFRelease(cf: *const std::ffi::c_void);
+}
+
+/// Globale Cursor-Position in Punkten (Ursprung oben links, Hauptdisplay).
+pub(crate) fn cursor_location() -> Option<CGPoint> {
+    unsafe {
+        let event = CGEventCreate(std::ptr::null());
+        if event.is_null() {
+            return None;
+        }
+        let loc = CGEventGetLocation(event);
+        CFRelease(event);
+        Some(loc)
+    }
+}
+
+/// Alle aktiven Display-Rechtecke im globalen Punkt-Koordinatensystem.
+pub(crate) fn display_bounds() -> Vec<CGRect> {
+    let mut ids = [0u32; 8];
+    let mut count = 0u32;
+    let ok = unsafe { CGGetActiveDisplayList(8, ids.as_mut_ptr(), &mut count) };
+    if ok != 0 {
+        return Vec::new();
+    }
+    ids.iter()
+        .take(count as usize)
+        .map(|&id| unsafe { CGDisplayBounds(id) })
+        .collect()
+}
+
+/// Liegt der Cursor in der Ecke unten links IRGENDEINES Displays?
+fn in_bottom_left_corner(zone: f64) -> bool {
+    let Some(loc) = cursor_location() else {
+        return false;
+    };
+    for b in display_bounds() {
+        let left = b.origin.x;
+        let bottom = b.origin.y + b.size.height;
+        if loc.x <= left + zone && loc.y >= bottom - zone {
+            return true;
+        }
+    }
+    false
+}
+
+fn hot_corner_running() -> &'static std::sync::atomic::AtomicBool {
+    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    &RUNNING
+}
+
+/// Startet den Ecken-Poller (idempotent). Feuert "hot-corner" beim
+/// EINTRITT in die Zone (flankengesteuert, kein Dauerfeuer).
+#[tauri::command]
+pub fn hot_corner_start(app: tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    if hot_corner_running().swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut inside = false;
+        while hot_corner_running().load(Ordering::SeqCst) {
+            let now_inside = in_bottom_left_corner(14.0);
+            if now_inside && !inside {
+                let _ = app.emit("hot-corner", ());
+            }
+            inside = now_inside;
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    });
+}
+
+#[tauri::command]
+pub fn hot_corner_stop() {
+    hot_corner_running().store(false, std::sync::atomic::Ordering::SeqCst);
 }
