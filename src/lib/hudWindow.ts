@@ -77,8 +77,10 @@ export async function showIsland(): Promise<void> {
   try {
     const win = getCurrentWindow();
     await layoutIsland("compact");
+    // Kein setFocus: Die Insel ist eine Systemschicht und darf dem Nutzer
+    // beim Summon nicht die Tastatur wegnehmen. Esc greift erst nach Klick
+    // auf die Insel; Dismiss ohne Klick läuft über den Hotkey.
     await win.show();
-    await win.setFocus();
   } catch {
     // Ignorieren.
   }

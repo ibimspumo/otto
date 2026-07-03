@@ -2,13 +2,18 @@
 //
 // 1. `top_inset` — Höhe von Notch/Menüleiste (Safe Area) in logischen
 //    Punkten, damit die Insel exakt darunter schweben kann.
-// 2. Doppel-Cmd-Erkennung — ein globaler NSEvent-Monitor auf FlagsChanged:
-//    zweimal ⌘ kurz hintereinander (ohne andere Modifier) feuert das Event
+// 2. Doppel-Cmd-Erkennung — NSEvent-Monitore auf FlagsChanged: zweimal ⌘
+//    kurz hintereinander (ohne andere Modifier) feuert das Event
 //    "double-cmd" ans Frontend. Modifier-only-Taps kann das Global-Shortcut-
-//    Plugin nicht; dafür braucht es diesen Monitor (und die Bedienungs-
+//    Plugin nicht; dafür braucht es diese Monitore (und die Bedienungs-
 //    hilfen-Freigabe, sonst liefert macOS schlicht keine Events).
+//    Es sind ZWEI Monitore: Der globale sieht nur Events, die an ANDERE
+//    Apps gehen — ist ein Otto-Fenster selbst Key, kommt dort nichts an.
+//    Der lokale deckt den eigenen Prozess ab; beide teilen sich den
+//    Tap-Zustand.
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::ptr::NonNull;
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -23,7 +28,7 @@ use tauri::Emitter;
 const DOUBLE_MS: u128 = 400;
 
 thread_local! {
-    static MONITOR: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+    static MONITORS: RefCell<Vec<Retained<AnyObject>>> = const { RefCell::new(Vec::new()) };
 }
 
 fn on_main<T: Send + 'static>(
@@ -67,15 +72,16 @@ pub fn top_inset(app: tauri::AppHandle) -> Result<f64, String> {
 }
 
 fn dbl_start_on_main(app: tauri::AppHandle) {
-    MONITOR.with(|m| {
-        if m.borrow().is_some() {
+    MONITORS.with(|m| {
+        if !m.borrow().is_empty() {
             return;
         }
-        // Zustand lebt im Block: war ⌘ zuletzt gedrückt, wann war der letzte Tap?
-        let prev_cmd = Cell::new(false);
-        let last_tap = Cell::new(0u128);
-        let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
-            let flags = unsafe { event.as_ref().modifierFlags() };
+        // Geteilter Zustand: war ⌘ zuletzt gedrückt, wann war der letzte Tap?
+        // Rc, weil globaler und lokaler Monitor dieselbe Sequenz sehen müssen
+        // (der erste Tap kann außerhalb, der zweite innerhalb der App landen).
+        let state = Rc::new((Cell::new(false), Cell::new(0u128)));
+        let on_flags = move |flags: NSEventModifierFlags| {
+            let (prev_cmd, last_tap) = &*state;
             let independent =
                 flags.intersection(NSEventModifierFlags::DeviceIndependentFlagsMask);
             let cmd_only = independent == NSEventModifierFlags::Command;
@@ -92,18 +98,39 @@ fn dbl_start_on_main(app: tauri::AppHandle) {
                 last_tap.set(0);
             }
             prev_cmd.set(cmd_only);
+        };
+        let mut monitors = m.borrow_mut();
+        let global_flags = on_flags.clone();
+        let global_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
+            global_flags(unsafe { event.as_ref().modifierFlags() });
         });
-        let monitor = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
+        if let Some(monitor) = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
             NSEventMask::FlagsChanged,
-            &block,
-        );
-        *m.borrow_mut() = monitor;
+            &global_block,
+        ) {
+            monitors.push(monitor);
+        }
+        // Lokale Monitore reichen das Event weiter (Rückgabe != null),
+        // sonst käme es nie bei den Fenstern an.
+        let local_block =
+            block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+                on_flags(unsafe { event.as_ref().modifierFlags() });
+                event.as_ptr()
+            });
+        if let Some(monitor) = unsafe {
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+                NSEventMask::FlagsChanged,
+                &local_block,
+            )
+        } {
+            monitors.push(monitor);
+        }
     });
 }
 
 fn dbl_stop_on_main() {
-    MONITOR.with(|m| {
-        if let Some(monitor) = m.borrow_mut().take() {
+    MONITORS.with(|m| {
+        for monitor in m.borrow_mut().drain(..) {
             unsafe { NSEvent::removeMonitor(&monitor) };
         }
     });
