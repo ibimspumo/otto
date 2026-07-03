@@ -76,8 +76,8 @@ export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
   return (
     <section className="files-pane">
       <p className="files-sub">
-        Diese Dateien formen Ottos Identität, Gedächtnis und das Artefakt-Design
-        (STYLE.css). Er liest sie bei jedem Verbindungsaufbau. &nbsp;·&nbsp;{" "}
+        Diese Dateien formen Ottos Persona, Gedächtnis und das Artefakt-Design
+        (STYLE.css). Werkzeuge und Systemfähigkeiten kommen aus dem App-Code. &nbsp;·&nbsp;{" "}
         <span className="mono">{dirPath}</span>
       </p>
 

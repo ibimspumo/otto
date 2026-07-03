@@ -8,7 +8,6 @@ const DEFAULT_FILES: &[(&str, &str)] = &[
     ("SOUL.md", include_str!("../defaults/SOUL.md")),
     ("USER.md", include_str!("../defaults/USER.md")),
     ("MEMORY.md", include_str!("../defaults/MEMORY.md")),
-    ("TOOLS.md", include_str!("../defaults/TOOLS.md")),
     ("STYLE.css", include_str!("../defaults/STYLE.css")),
 ];
 
@@ -30,6 +29,7 @@ fn agent_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn validate_name(name: &str) -> Result<(), String> {
     let ok = (name.ends_with(".md") || name.ends_with(".css"))
+        && name != "TOOLS.md"
         && !name.contains('/')
         && !name.contains('\\')
         && !name.contains("..")
@@ -37,7 +37,10 @@ fn validate_name(name: &str) -> Result<(), String> {
     if ok {
         Ok(())
     } else {
-        Err("Ungültiger Dateiname (nur einfache .md- oder .css-Dateien erlaubt).".into())
+        Err(
+            "Ungültiger Dateiname (nur einfache .md- oder .css-Dateien erlaubt; TOOLS.md ist intern)."
+                .into(),
+        )
     }
 }
 
@@ -48,9 +51,9 @@ pub fn list_agent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| n.ends_with(".md") || n.ends_with(".css"))
+        .filter(|n| n != "TOOLS.md" && (n.ends_with(".md") || n.ends_with(".css")))
         .collect();
-    let order = ["SOUL.md", "USER.md", "MEMORY.md", "TOOLS.md", "STYLE.css"];
+    let order = ["SOUL.md", "USER.md", "MEMORY.md", "STYLE.css"];
     names.sort_by_key(|n| {
         let rank = order.iter().position(|o| o == n).unwrap_or(usize::MAX);
         (rank, n.clone())

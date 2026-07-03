@@ -244,7 +244,10 @@ export async function layoutQuickLook(
     await invoke("panel_vibrancy", { enable: true, radius: QL_RADIUS }).catch(
       () => {},
     );
-    await panel.setShadow(size === "normal").catch(() => {});
+    // Native Fensterschatten auf transparenten, dekorationslosen Webviews
+    // zeichnen macOS-seitig rechteckig. Die gerundete Materialfläche trägt
+    // ihren Schatten selbst per CSS, damit keine eckige Außenkante entsteht.
+    await panel.setShadow(false).catch(() => {});
     await panel.setSize(new PhysicalSize(Math.round(w * sf), Math.round(h * sf)));
     await panel.setPosition(new PhysicalPosition(Math.round(x * sf), Math.round(y * sf)));
     await panel.setAlwaysOnTop(false);
