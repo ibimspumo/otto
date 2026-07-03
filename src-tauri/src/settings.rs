@@ -15,8 +15,6 @@ pub struct Settings {
     pub voice: String,
     pub reasoning_effort: String,
     pub image_model: String,
-    pub computer_model: String,
-    pub computer_use_enabled: bool,
     pub terminal_enabled: bool,
     pub wake_word_enabled: bool,
     pub wake_word_phrase: String,
@@ -43,8 +41,6 @@ impl Default for Settings {
             voice: String::new(),
             reasoning_effort: String::new(),
             image_model: String::new(),
-            computer_model: String::new(),
-            computer_use_enabled: true,
             terminal_enabled: true,
             wake_word_enabled: false,
             wake_word_phrase: "Hey Otto".into(),
@@ -170,9 +166,6 @@ fn normalize_settings(settings: &mut Settings) {
     }
     if settings.image_model.trim().is_empty() {
         settings.image_model = "gpt-image-2".into();
-    }
-    if settings.computer_model.trim().is_empty() {
-        settings.computer_model = "gpt-5.5".into();
     }
     if settings.wake_word_phrase.trim().is_empty() {
         settings.wake_word_phrase = "Hey Otto".into();

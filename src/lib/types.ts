@@ -14,8 +14,6 @@ export interface Settings {
   voice: string;
   reasoning_effort: string;
   image_model: string;
-  computer_model: string;
-  computer_use_enabled: boolean;
   terminal_enabled: boolean;
   wake_word_enabled: boolean;
   wake_word_phrase: string;
@@ -43,7 +41,6 @@ export interface Diagnostics {
   in_applications: boolean;
   dev_build: boolean;
   quarantined: boolean | null;
-  screen_access: boolean;
   accessibility: boolean;
 }
 

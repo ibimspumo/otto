@@ -1,6 +1,5 @@
 mod agent_files;
 mod cli;
-mod computer_use;
 mod diagnostics;
 mod fs_util;
 mod images;
@@ -76,10 +75,8 @@ pub fn run() {
             agent_files::write_agent_file,
             agent_files::agent_dir_path,
             search::brave_search,
-            computer_use::run_computer_use,
-            computer_use::permissions::cu_permissions,
-            computer_use::cu_cancel,
             diagnostics::app_diagnostics,
+            diagnostics::request_accessibility,
             terminal::run_terminal,
             window_effects::panel_vibrancy,
             logging::log_line,

@@ -1,9 +1,9 @@
 //! App-Identität & Laufumgebung — Diagnose für robuste TCC-Behandlung OHNE
 //! Apple-Code-Signing.
 //!
-//! macOS bindet erteilte Freigaben (Bildschirmaufnahme, Bedienungshilfen) an
-//! die Code-Identität bzw. den Pfad der App. Ohne Signatur bricht das auf zwei
-//! Arten:
+//! macOS bindet erteilte Freigaben (z. B. Bedienungshilfen für den
+//! Doppel-Cmd-Hotkey) an die Code-Identität bzw. den Pfad der App. Ohne
+//! Signatur bricht das auf zwei Arten:
 //!  - **App Translocation (Gatekeeper Path Randomization):** wird eine frisch
 //!    geladene, quarantänebehaftete App direkt aus dem Download/DMG gestartet,
 //!    läuft sie aus einem zufälligen, schreibgeschützten Pfad unter
@@ -19,6 +19,42 @@
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+
+// macOS-TCC: Bedienungshilfen (braucht der native Doppel-Cmd-Hotkey).
+#[cfg(target_os = "macos")]
+mod tcc {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        pub fn AXIsProcessTrusted() -> bool;
+    }
+}
+
+/// Reine Vorprüfung der Bedienungshilfen-Freigabe OHNE Nutzer-Dialog.
+pub fn accessibility_granted() -> bool {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        tcc::AXIsProcessTrusted()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Öffnet bei fehlender Bedienungshilfen-Freigabe die Systemeinstellungen und
+/// meldet den aktuellen Stand. Wird vom „Anfordern“-Knopf der Einstellungen
+/// genutzt — der Doppel-Cmd-Hotkey braucht diese Freigabe.
+#[tauri::command]
+pub fn request_accessibility() -> Result<bool, String> {
+    let granted = accessibility_granted();
+    #[cfg(target_os = "macos")]
+    if !granted {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .status();
+    }
+    Ok(granted)
+}
 
 /// Momentaufnahme der App-Identität und der TCC-Vorprüfung.
 #[derive(Serialize, Clone, Debug)]
@@ -37,8 +73,6 @@ pub struct Diagnostics {
     pub dev_build: bool,
     /// Quarantäne-Attribut gesetzt? `None` = nicht ermittelbar.
     pub quarantined: Option<bool>,
-    /// Vorprüfung Bildschirmaufnahme (löst KEINEN Dialog aus).
-    pub screen_access: bool,
     /// Vorprüfung Bedienungshilfen (löst KEINEN Dialog aus).
     pub accessibility: bool,
 }
@@ -116,7 +150,6 @@ pub fn collect(app: &tauri::AppHandle) -> Diagnostics {
     let bundle = app_bundle(&exe);
     // Quarantäne prüft man am Bundle, sonst an der Executable.
     let quarantine_target = bundle.as_deref().unwrap_or(&exe);
-    let (screen_access, accessibility) = crate::computer_use::permissions::preflight();
     Diagnostics {
         exe_path: exe.to_string_lossy().to_string(),
         bundle_path: bundle.as_ref().map(|p| p.to_string_lossy().to_string()),
@@ -125,8 +158,7 @@ pub fn collect(app: &tauri::AppHandle) -> Diagnostics {
         in_applications: in_applications(&exe),
         dev_build: is_dev_build(&exe),
         quarantined: quarantine(quarantine_target),
-        screen_access,
-        accessibility,
+        accessibility: accessibility_granted(),
     }
 }
 
@@ -148,7 +180,7 @@ pub fn log_startup(app: &tauri::AppHandle) {
         None => "?",
     };
     let line = format!(
-        "diagnostics: exe={} bundle={} id={} translocated={} in_applications={} dev_build={} quarantined={} screen={} accessibility={}",
+        "diagnostics: exe={} bundle={} id={} translocated={} in_applications={} dev_build={} quarantined={} accessibility={}",
         d.exe_path,
         d.bundle_path.as_deref().unwrap_or("-"),
         d.bundle_id,
@@ -156,50 +188,12 @@ pub fn log_startup(app: &tauri::AppHandle) {
         d.in_applications,
         d.dev_build,
         quar,
-        d.screen_access,
         d.accessibility,
     );
     let _ = crate::logging::log_line(app.clone(), line.clone());
     if d.translocated || (!d.in_applications && !d.dev_build) {
         crate::logging::crash_log(&line);
     }
-}
-
-/// Standort-Wächter für Computer Use: nur die installierte `/Applications`-Kopie
-/// bekommt dauerhafte TCC-Freigaben. Läuft Otto aus einer translozierten Kopie
-/// oder einer Dev-Binary (ohne erteilte Freigaben), gibt es einen freundlichen
-/// Hinweis statt eines stillen Fehlschlags.
-pub fn computer_use_location_guard() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let exe = exe_path();
-        if is_translocated(&exe) {
-            return Err(
-                "Otto läuft gerade aus einer translozierten Kopie (macOS App Translocation), \
-                 deshalb merkt sich das System die Freigaben für Computer Use nicht. \
-                 Bitte Otto per Finder in den Ordner „Programme“ (/Applications) verschieben, \
-                 die Quarantäne entfernen (Rechtsklick → „Öffnen“) und Otto neu starten. \
-                 Sag das dem Nutzer."
-                    .into(),
-            );
-        }
-        if is_dev_build(&exe) {
-            // Dev-/Debug-Binary hat eine andere Identität als die installierte
-            // App. Nur blockieren, wenn die Freigaben tatsächlich fehlen — sonst
-            // lässt sich in der Dev-Umgebung weiter testen (Freigaben wurden dort
-            // manuell erteilt).
-            let (screen, ax) = crate::computer_use::permissions::preflight();
-            if !screen || !ax {
-                return Err(
-                    "Computer Use läuft hier aus einer Dev-/Debug-Version von Otto, die keine \
-                     dauerhaften macOS-Freigaben bekommt. Bitte die installierte Otto-App aus dem \
-                     Ordner „Programme“ (/Applications) verwenden. Sag das dem Nutzer."
-                        .into(),
-                );
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

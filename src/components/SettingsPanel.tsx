@@ -3,8 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   appDiagnostics,
   cliAvailable,
-  cuPermissions,
   logLine,
+  requestAccessibility,
   saveSettings,
 } from "../lib/tauriApi";
 import { fetchImageModels, IMAGE_MODELS, type ImageModelInfo } from "../lib/imagegen";
@@ -147,12 +147,11 @@ export default function SettingsPanel({
 
   async function checkPermissions() {
     try {
-      const p = await cuPermissions(true);
+      const granted = await requestAccessibility();
       setPermStatus(
-        `Bildschirmaufnahme: ${p.screen ? "✓" : "✗"} · Bedienungshilfen: ${p.accessibility ? "✓" : "✗"}` +
-          (p.screen && p.accessibility
-            ? ""
-            : " — nach dem Erteilen Otto neu starten."),
+        granted
+          ? "Bedienungshilfen: ✓"
+          : "Bedienungshilfen: ✗ — nach dem Erteilen Otto neu starten.",
       );
     } catch (e) {
       setPermStatus(String(e));
@@ -175,7 +174,13 @@ export default function SettingsPanel({
           />
         );
       case "aktivierung":
-        return <ActivationSettings {...shared} />;
+        return (
+          <ActivationSettings
+            {...shared}
+            permStatus={permStatus}
+            onCheckPermissions={() => void checkPermissions()}
+          />
+        );
       case "stimme":
         return <VoiceSettings {...shared} />;
       case "keys":
@@ -192,14 +197,7 @@ export default function SettingsPanel({
       case "gedaechtnis":
         return <MemorySettings {...shared} />;
       case "faehigkeiten":
-        return (
-          <CapabilitySettings
-            {...shared}
-            permStatus={permStatus}
-            cliStatus={cliStatus}
-            onCheckPermissions={() => void checkPermissions()}
-          />
-        );
+        return <CapabilitySettings {...shared} cliStatus={cliStatus} />;
       case "diagnose":
         return <DiagnosticsSettings diag={diag} onRefresh={refreshDiag} />;
     }

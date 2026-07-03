@@ -35,21 +35,14 @@ export const writeAgentFile = (name: string, content: string) =>
 
 export const agentDirPath = () => invoke<string>("agent_dir_path");
 
-export const runComputerUse = (task: string, apiKey: string, model?: string) =>
-  invoke<string>("run_computer_use", { task, apiKey, model });
-
-export const cuCancel = () => invoke<void>("cu_cancel");
-
 export const runTerminal = (command: string, timeoutS?: number) =>
   invoke<{ exit_code: number | null; stdout: string; stderr: string }>(
     "run_terminal",
     { command, timeoutS },
   );
 
-export const cuPermissions = (request: boolean) =>
-  invoke<{ screen: boolean; accessibility: boolean }>("cu_permissions", {
-    request,
-  });
+export const requestAccessibility = () =>
+  invoke<boolean>("request_accessibility");
 
 export const imagesList = () => invoke<ImageMeta[]>("images_list");
 

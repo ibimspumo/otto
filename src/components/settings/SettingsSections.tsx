@@ -83,7 +83,15 @@ export function GeneralSettings({
   );
 }
 
-export function ActivationSettings({ form, set }: SectionProps) {
+export function ActivationSettings({
+  form,
+  set,
+  permStatus,
+  onCheckPermissions,
+}: SectionProps & {
+  permStatus: string | null;
+  onCheckPermissions: () => void;
+}) {
   return (
     <>
       <Group title="Wake Word">
@@ -129,6 +137,17 @@ export function ActivationSettings({ form, set }: SectionProps) {
             disabled={!form.hotkey_enabled}
             onChange={(e) => set({ hotkey: e.target.value })}
           />
+        </Row>
+        <Row
+          label="Bedienungshilfen"
+          hint={
+            permStatus ??
+            "„2x Cmd“ braucht die macOS-Freigabe „Bedienungshilfen“ — der Knopf öffnet bei Bedarf die Systemeinstellungen."
+          }
+        >
+          <button className="push" type="button" onClick={onCheckPermissions}>
+            Anfordern
+          </button>
         </Row>
       </Group>
     </>
@@ -382,8 +401,7 @@ export function DiagnosticsSettings({
           hint="Ohne Dialog geprüft — löst keine Systemabfrage aus."
         >
           <span className="mono">
-            Bildschirmaufnahme: {diag.screen_access ? "✓" : "✗"} · Bedienungshilfen:{" "}
-            {diag.accessibility ? "✓" : "✗"}
+            Bedienungshilfen: {diag.accessibility ? "✓" : "✗"}
           </span>
         </Row>
         <Row label="Neu prüfen" hint="Nach dem Verschieben/Neustart hier erneut prüfen.">
@@ -411,9 +429,9 @@ export function DiagnosticsSettings({
         <Row
           wide
           label="3 · Freigaben anfordern"
-          hint="Unter Einstellungen → Fähigkeiten den Knopf „Anfordern“ nutzen; er löst die macOS-Abfragen für „Bildschirmaufnahme“ und „Bedienungshilfen“ aus. Danach Otto einmal neu starten."
+          hint="Unter Einstellungen → Aktivierung den Knopf „Anfordern“ nutzen; er öffnet die macOS-Einstellungen für „Bedienungshilfen“. Danach Otto einmal neu starten."
         >
-          <span className="row-hint">Einstellungen → Fähigkeiten → „Anfordern“</span>
+          <span className="row-hint">Einstellungen → Aktivierung → „Anfordern“</span>
         </Row>
         <Row
           wide
@@ -421,7 +439,7 @@ export function DiagnosticsSettings({
           hint="Sind noch alte Freigaben einer früheren Kopie hängen geblieben, im Terminal zurücksetzen und Otto neu starten. Setzt nur die Freigaben von Otto zurück, sonst nichts."
         >
           <span className="mono" style={{ wordBreak: "break-all" }}>
-            {`tccutil reset ScreenCapture ${diag.bundle_id}; tccutil reset Accessibility ${diag.bundle_id}`}
+            {`tccutil reset Accessibility ${diag.bundle_id}`}
           </span>
         </Row>
       </Group>
@@ -432,13 +450,9 @@ export function DiagnosticsSettings({
 export function CapabilitySettings({
   form,
   set,
-  permStatus,
   cliStatus,
-  onCheckPermissions,
 }: SectionProps & {
-  permStatus: string | null;
   cliStatus: { codex: boolean; claude: boolean } | null;
-  onCheckPermissions: () => void;
 }) {
   return (
     <>
@@ -449,34 +463,6 @@ export function CapabilitySettings({
             checked={form.terminal_enabled}
             onChange={(v) => set({ terminal_enabled: v })}
           />
-        </Row>
-        <Row label="Computer Use" hint="Bildschirm sehen, klicken, tippen.">
-          <Switch
-            label="Computer Use erlauben"
-            checked={form.computer_use_enabled}
-            onChange={(v) => set({ computer_use_enabled: v })}
-          />
-        </Row>
-        <Row
-          label="Computer-Use-Modell"
-          hint="Standard: gpt-5.5 (Responses API). computer-use-preview ist Tier-3-beschränkt und endet 07/2026."
-        >
-          <input
-            type="text"
-            value={form.computer_model}
-            onChange={(e) => set({ computer_model: e.target.value })}
-          />
-        </Row>
-        <Row
-          label="Systemfreigaben"
-          hint={
-            permStatus ??
-            "Otto braucht „Bildschirmaufnahme“ und „Bedienungshilfen“ — der Knopf löst die macOS-Abfragen aus."
-          }
-        >
-          <button className="push" type="button" onClick={onCheckPermissions}>
-            Anfordern
-          </button>
         </Row>
       </Group>
       <Group title="Delegation">

@@ -286,16 +286,6 @@ export default function App() {
     [setImage],
   );
 
-  // Computer-Use-Schritte aus Rust in die Aktivitätsanzeige spiegeln.
-  useEffect(() => {
-    const un = listen<{ text: string }>("cu-status", (e) =>
-      pushActivity(e.payload.text),
-    );
-    return () => {
-      un.then((f) => f());
-    };
-  }, [pushActivity]);
-
   // Live-Output laufender Hintergrund-Jobs (delegate_task) anzeigen.
   useEffect(() => {
     const un = listen<{ job_id: string; agent: string; line: string }>(
@@ -661,32 +651,6 @@ export default function App() {
                 out = { ok: true, ...res };
               }
             } catch (e) {
-              out = { ok: false, error: String(e) };
-            }
-            break;
-          }
-          case "computer_use": {
-            if (!settingsRefValue.current?.computer_use_enabled) {
-              out = {
-                ok: false,
-                error: "Computer Use ist in den Einstellungen deaktiviert.",
-              };
-              break;
-            }
-            const key = settingsRefValue.current?.openai_api_key?.trim() ?? "";
-            const task = String(args.task ?? "");
-            pushActivity(`übernimmt den Computer: ${task.slice(0, 60)}${task.length > 60 ? "…" : ""}`);
-            // Die Insel bleibt sichtbar — sie zeigt die CU-Schritte als
-            // Caption, ein eigenes Mini-Fenster braucht es nicht mehr.
-            try {
-              const result = await api.runComputerUse(
-                task,
-                key,
-                settingsRefValue.current?.computer_model,
-              );
-              out = { ok: true, result };
-            } catch (e) {
-              setError(String(e));
               out = { ok: false, error: String(e) };
             }
             break;
@@ -1588,7 +1552,6 @@ export default function App() {
       clientRef.current = client;
       // Deaktivierte Fähigkeiten werden Otto gar nicht erst angeboten.
       const tools = toolDefs.filter((t: { name?: string }) => {
-        if (t.name === "computer_use" && !current.computer_use_enabled) return false;
         if (t.name === "run_terminal" && !current.terminal_enabled) return false;
         if (
           (t.name === "delegate_task" || t.name === "cancel_job") &&
