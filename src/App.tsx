@@ -524,7 +524,7 @@ export default function App() {
       try {
         switch (call.name) {
           case "create_artifact": {
-            const kind: ArtifactKind = ["markdown", "code", "html"].includes(args.kind)
+            const kind: ArtifactKind = ["markdown", "code"].includes(args.kind)
               ? args.kind
               : "markdown";
             const title = String(args.title ?? "Ohne Titel");
@@ -629,7 +629,7 @@ export default function App() {
               results: res.results,
               artifact_id: artifactId,
               next_step:
-                "Erstelle jetzt ein gestaltetes HTML-Artefakt mit create_artifact(kind=\"html\", present=true), das die Recherche auswertet, strukturiert und Quellen verlinkt.",
+                "Erstelle jetzt ein Markdown-Artefakt mit create_artifact(kind=\"markdown\", present=true), das die Recherche auswertet, strukturiert und Quellen verlinkt. Nutze Tabellen, klare Abschnitte und bei Bedarf Mermaid-Diagramme.",
             };
             break;
           }
@@ -1162,7 +1162,10 @@ export default function App() {
                 prompt: m.prompt.slice(0, 80),
                 favorit: m.favorite,
                 groesse: m.size,
+                markdown: `![${m.name}](otto-image:${m.id})`,
               })),
+              note:
+                "Galerie-Bilder können in Markdown-Artefakten direkt mit ![Name](otto-image:<id>) eingebettet werden.",
             };
             break;
           }
@@ -1206,22 +1209,6 @@ export default function App() {
             } else {
               out = { ok: false, error: `Unbekannte Aktion: ${action}` };
             }
-            break;
-          }
-          case "get_artifact_style": {
-            out = { ok: true, css: await api.readAgentFile("STYLE.css") };
-            break;
-          }
-          case "set_artifact_style": {
-            const css = String(args.css ?? "");
-            if (!css.trim()) {
-              out = { ok: false, error: "Leeres Stylesheet." };
-              break;
-            }
-            await api.writeAgentFile("STYLE.css", css);
-            setArtifactStyle(css);
-            pushActivity("gestaltet das Artefakt-Design um");
-            out = { ok: true, note: "STYLE.css ersetzt — HTML-Artefakte nutzen es sofort." };
             break;
           }
           case "remember": {

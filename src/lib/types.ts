@@ -75,7 +75,7 @@ export interface CliJob {
   startedAt?: number;
 }
 
-export type ArtifactKind = "markdown" | "code" | "html" | "search" | "image";
+export type ArtifactKind = "markdown" | "code" | "search" | "image";
 
 export interface ImageMeta {
   id: string;

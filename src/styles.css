@@ -603,25 +603,6 @@ button {
   padding: 1px 7px;
 }
 
-/* HTML-Seite auf ein Drittel verkleinert — echtes Rendering. */
-.mini-html {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  pointer-events: none;
-  background: var(--page);
-}
-
-.mini-html iframe {
-  width: 912px;
-  height: 558px;
-  border: 0;
-  transform: scale(0.3333);
-  transform-origin: 0 0;
-  background: var(--page);
-  pointer-events: none;
-}
-
 /* Dokument als verkleinerte Lesespalte. */
 .mini-doc {
   width: 100%;
@@ -788,11 +769,6 @@ button {
   background: linear-gradient(to bottom, var(--glass-tint-strong), transparent);
 }
 
-.ql-shell[data-kind="html"] .ql-bar {
-  background: rgba(10, 10, 14, 0.88);
-  border-bottom: 1px solid var(--hair);
-}
-
 .ql-close {
   flex: none;
   width: 20px;
@@ -896,20 +872,6 @@ button {
   margin: 0 auto;
 }
 
-.ql-html {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  padding-top: 44px;
-  background: var(--page);
-}
-
-.ql-html iframe {
-  flex: 1;
-  border: 0;
-  background: var(--page);
-}
-
 /* ------------------------------------------------------------------ */
 /* Inhalte: Markdown, Code, Suche                                      */
 /* ------------------------------------------------------------------ */
@@ -966,6 +928,22 @@ button {
   text-decoration-color: rgba(255, 255, 255, 0.7);
 }
 
+.md-body img {
+  display: block;
+  max-width: 100%;
+  max-height: min(58vh, 520px);
+  margin: 14px auto;
+  object-fit: contain;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.32);
+  box-shadow: 0 0 0 1px var(--hair);
+}
+
+.mini-doc .md-body img {
+  max-height: 180px;
+  margin: 8px 0;
+}
+
 .md-body code {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -988,6 +966,31 @@ button {
   background: none;
   border: none;
   padding: 0;
+}
+
+.md-body pre.mermaid-error {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.mermaid-chart {
+  margin: 14px 0;
+  padding: 14px;
+  overflow-x: auto;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.mermaid-chart svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mini-doc .mermaid-chart {
+  padding: 8px;
+  margin: 8px 0;
 }
 
 .md-body blockquote {

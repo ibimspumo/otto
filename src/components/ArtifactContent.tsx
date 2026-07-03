@@ -1,9 +1,10 @@
 // Gemeinsame Inhalts-Renderer für Artefakte — genutzt von Quick Look
 // (Vollansicht) und, in skalierter Form, von den Drop-Miniaturen.
-// Grundsatz: Jeder Artefakt-Typ wird ECHT gerendert (HTML als Seite,
-// Markdown als Dokument), nie als Rohtext-Ausschnitt.
+// Grundsatz: Jeder Artefakt-Typ wird ECHT gerendert (Markdown als
+// Dokument, Mermaid als Diagramm, Bilder als Bilder), nie als
+// Rohtext-Ausschnitt.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -11,119 +12,38 @@ import type { Artifact, ImageState } from "../lib/types";
 
 marked.setOptions({ gfm: true, breaks: true });
 
+type MermaidApi = typeof import("mermaid").default;
+let mermaidPromise: Promise<MermaidApi> | null = null;
+
+function loadMermaid(): Promise<MermaidApi> {
+  if (!mermaidPromise) {
+    mermaidPromise = import("mermaid").then((m) => {
+      const mermaid = m.default;
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "dark",
+        themeVariables: {
+          background: "#0f0f13",
+          mainBkg: "#17171c",
+          primaryColor: "#17171c",
+          primaryTextColor: "rgba(255,255,255,0.92)",
+          primaryBorderColor: "rgba(255,255,255,0.16)",
+          lineColor: "rgba(255,255,255,0.54)",
+          textColor: "rgba(255,255,255,0.86)",
+          clusterBkg: "rgba(255,255,255,0.045)",
+          clusterBorder: "rgba(255,255,255,0.13)",
+          fontFamily:
+            '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif',
+        },
+      });
+      return mermaid;
+    });
+  }
+  return mermaidPromise;
+}
+
 export type ImageAction = "favorite" | "delete" | "save";
-
-const HTML_BASE_STYLE = `
-:root {
-  color-scheme: dark;
-  --ink: rgba(255, 255, 255, 0.92);
-  --ink-2: rgba(255, 255, 255, 0.66);
-  --ink-3: rgba(255, 255, 255, 0.44);
-  --hair: rgba(255, 255, 255, 0.1);
-  --hair-2: rgba(255, 255, 255, 0.16);
-  --fill: rgba(255, 255, 255, 0.07);
-  --page: #0f0f13;
-  --surface: rgba(255, 255, 255, 0.055);
-  --amber: oklch(0.79 0.13 75);
-  --ice: oklch(0.82 0.08 220);
-  --violet: oklch(0.75 0.11 300);
-  --accent: var(--amber);
-  --accent-2: var(--ice);
-  --accent-3: var(--violet);
-  --text: var(--ink);
-  --muted: var(--ink-2);
-  --bg: var(--page);
-  --radius: 10px;
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-}
-* { box-sizing: border-box; }
-html { margin: 0; background: var(--page); color: var(--ink); }
-body {
-  margin: 0;
-  padding: 28px;
-  background: var(--page);
-  color: var(--ink);
-  font-family: var(--font-ui);
-  font-size: 14px;
-  line-height: 1.58;
-  -webkit-font-smoothing: antialiased;
-}
-h1, h2, h3 { margin: 0 0 0.65em; color: var(--ink); font-family: var(--font-ui); font-weight: 650; letter-spacing: 0; }
-h1 { font-size: 1.55rem; line-height: 1.15; padding-bottom: 0.52rem; border-bottom: 1px solid var(--hair); }
-h2 { font-size: 1.15rem; line-height: 1.25; }
-h3 { font-size: 0.9rem; color: var(--ink-2); }
-p, ul, ol { margin: 0 0 0.9rem; color: var(--ink-2); }
-ul, ol { padding-left: 1.35rem; }
-a { color: var(--ink); text-decoration: underline; text-decoration-color: rgba(255, 255, 255, 0.34); text-underline-offset: 2px; }
-code, pre { font-family: var(--font-mono); font-size: 0.88em; }
-code { padding: 1px 6px; border: 1px solid var(--hair); border-radius: 5px; background: var(--fill); }
-pre { margin: 12px 0; padding: 14px; overflow-x: auto; border: 1px solid var(--hair); border-radius: 8px; background: rgba(0, 0, 0, 0.28); }
-pre code { padding: 0; border: 0; background: transparent; }
-table { width: 100%; margin: 12px 0; border-collapse: collapse; }
-th, td { padding: 8px 10px; border-bottom: 1px solid var(--hair); text-align: left; }
-th { color: var(--ink-2); font-size: 0.78rem; font-weight: 600; }
-.card { margin: 12px 0; padding: 16px 18px; border: 1px solid var(--hair); border-radius: var(--radius); background: var(--surface); }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.badge { display: inline-flex; align-items: center; min-height: 22px; padding: 1px 9px; border: 1px solid var(--hair-2); border-radius: 999px; background: var(--fill); color: var(--ink-2); font-size: 0.76rem; font-weight: 600; }
-.kpi { font-size: 2.2rem; line-height: 1.05; font-weight: 650; letter-spacing: 0; color: var(--ink); }
-.muted { color: var(--ink-2); }
-.bar { height: 8px; overflow: hidden; border: 1px solid var(--hair); border-radius: 999px; background: var(--fill); }
-.bar > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--violet), var(--ice)); }
-`;
-
-/** Bindet STYLE.css in ein HTML-Artefakt ein — egal ob Fragment oder ganze Seite. */
-export function buildHtmlDoc(content: string, css: string): string {
-  const head = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style data-otto-base>${HTML_BASE_STYLE}</style>${css.trim() ? `<style data-otto-style>${css}</style>` : ""}`;
-  if (/<head[\s>]/i.test(content)) {
-    if (/<\/head>/i.test(content)) {
-      return content.replace(/<\/head>/i, `${head}</head>`);
-    }
-    return content.replace(/<head([^>]*)>/i, `<head$1>${head}`);
-  }
-  if (/<html[\s>]/i.test(content)) {
-    return content.replace(/<html([^>]*)>/i, `<html$1><head>${head}</head>`);
-  }
-  if (/<body[\s>]/i.test(content)) {
-    return content.replace(/<body([^>]*)>/i, `<head>${head}</head><body$1>`);
-  }
-  return `<!doctype html><html><head>${head}</head><body>${content}</body></html>`;
-}
-
-export function HtmlArtifactFrame({
-  title,
-  content,
-  artifactStyle,
-  tabIndex,
-}: {
-  title: string;
-  content: string;
-  artifactStyle: string;
-  tabIndex?: number;
-}) {
-  const html = useMemo(
-    () => buildHtmlDoc(content, artifactStyle),
-    [content, artifactStyle],
-  );
-  const [url, setUrl] = useState("");
-
-  useEffect(() => {
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const nextUrl = URL.createObjectURL(blob);
-    setUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [html]);
-
-  return (
-    <iframe
-      title={title}
-      sandbox=""
-      referrerPolicy="no-referrer"
-      tabIndex={tabIndex}
-      src={url}
-    />
-  );
-}
 
 /** Links aus Artefakten öffnen immer im Standard-Browser. */
 export function handleLinkClick(e: React.MouseEvent) {
@@ -134,13 +54,126 @@ export function handleLinkClick(e: React.MouseEvent) {
   }
 }
 
-export function MarkdownBody({ content }: { content: string }) {
-  const html = useMemo(
-    () => DOMPurify.sanitize(marked.parse(content, { async: false }) as string),
-    [content],
+function resolveMarkdownImages(
+  content: string,
+  images: Record<string, ImageState> = {},
+): string {
+  return content.replace(
+    /!\[([^\]]*)\]\((otto-image|gallery):([^) \t]+)(?:\s+"([^"]*)")?\)/g,
+    (match, alt: string, _scheme: string, id: string, title?: string) => {
+      const src = images[id]?.url;
+      if (!src) return match;
+      const quotedTitle = title ? ` "${title.replace(/"/g, "&quot;")}"` : "";
+      return `![${alt}](${src}${quotedTitle})`;
+    },
   );
+}
+
+function sanitizeMarkdownHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_URI_REGEXP:
+      /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|asset):|data:image\/(?:png|jpe?g|gif|webp|svg\+xml);|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+  });
+}
+
+function sanitizeMermaidSvg(svg: string): string {
+  return DOMPurify.sanitize(svg, {
+    ADD_TAGS: [
+      "svg",
+      "g",
+      "path",
+      "rect",
+      "circle",
+      "ellipse",
+      "line",
+      "polyline",
+      "polygon",
+      "marker",
+      "defs",
+      "text",
+      "tspan",
+      "style",
+    ],
+    ADD_ATTR: [
+      "viewBox",
+      "xmlns",
+      "d",
+      "x",
+      "y",
+      "x1",
+      "x2",
+      "y1",
+      "y2",
+      "cx",
+      "cy",
+      "r",
+      "rx",
+      "ry",
+      "points",
+      "marker-end",
+      "marker-start",
+      "text-anchor",
+      "dominant-baseline",
+      "class",
+      "style",
+    ],
+  });
+}
+
+export function MarkdownBody({
+  content,
+  images,
+}: {
+  content: string;
+  images?: Record<string, ImageState>;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const html = useMemo(
+    () =>
+      sanitizeMarkdownHtml(
+        marked.parse(resolveMarkdownImages(content, images), {
+          async: false,
+        }) as string,
+      ),
+    [content, images],
+  );
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    let cancelled = false;
+    const blocks = Array.from(
+      root.querySelectorAll<HTMLElement>("pre > code.language-mermaid"),
+    );
+    if (blocks.length === 0) return;
+    void loadMermaid().then((mermaid) => {
+      blocks.forEach((code, index) => {
+        const source = code.textContent ?? "";
+        const pre = code.parentElement;
+        if (!source.trim() || !pre) return;
+        const id = `otto-mermaid-${Date.now().toString(36)}-${index}`;
+        mermaid
+          .render(id, source)
+          .then(({ svg }) => {
+            if (cancelled) return;
+            const wrap = document.createElement("div");
+            wrap.className = "mermaid-chart";
+            wrap.innerHTML = sanitizeMermaidSvg(svg);
+            pre.replaceWith(wrap);
+          })
+          .catch(() => {
+            if (!cancelled) pre.classList.add("mermaid-error");
+          });
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [html]);
+
   return (
     <div
+      ref={ref}
       className="md-body"
       onClick={handleLinkClick}
       dangerouslySetInnerHTML={{ __html: html }}
@@ -286,12 +319,10 @@ export function ImageGrid({
 /** Vollansicht eines Artefakts (Quick-Look-Inhalt). */
 export function ArtifactBody({
   artifact,
-  artifactStyle,
   images,
   onImageAction,
 }: {
   artifact: Artifact;
-  artifactStyle: string;
   images: Record<string, ImageState>;
   onImageAction: (id: string, action: ImageAction) => void;
 }) {
@@ -325,23 +356,13 @@ export function ArtifactBody({
     case "markdown":
       return (
         <div className="ql-scroll doc">
-          <MarkdownBody content={artifact.content} />
+          <MarkdownBody content={artifact.content} images={images} />
         </div>
       );
     case "code":
       return (
         <div className="ql-scroll">
           <pre className="code-body">{artifact.content}</pre>
-        </div>
-      );
-    case "html":
-      return (
-        <div className="ql-html">
-          <HtmlArtifactFrame
-            title={artifact.title}
-            content={artifact.content}
-            artifactStyle={artifactStyle}
-          />
         </div>
       );
     case "search":

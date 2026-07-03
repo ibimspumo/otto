@@ -3,7 +3,6 @@ import { emit, listen } from "@tauri-apps/api/event";
 import {
   ArtifactBody,
   Favicon,
-  HtmlArtifactFrame,
   MarkdownBody,
   safeHost,
   type ImageAction,
@@ -21,7 +20,6 @@ interface PanelState {
   artifacts: Artifact[];
   activeId: string | null;
   images: Record<string, ImageState>;
-  artifactStyle: string;
 }
 
 type Mode = "stack" | "quicklook";
@@ -58,7 +56,6 @@ function heroPreviewHeight(
     }
     return 190;
   }
-  if (a.kind === "html") return 186;
   return 148;
 }
 
@@ -104,8 +101,6 @@ function desiredQuickLook(
       }
       return { w: 960 * boost, h: 660 * boost };
     }
-    case "html":
-      return { w: 940 * boost, h: 720 * boost };
     case "search":
       return { w: 680 * boost, h: 760 * boost };
     default:
@@ -125,11 +120,9 @@ function preferredPlacement(a: Artifact): PresentationPlacement {
 function DropPreview({
   artifact,
   images,
-  artifactStyle,
 }: {
   artifact: Artifact;
   images: Record<string, ImageState>;
-  artifactStyle: string;
 }) {
   switch (artifact.kind) {
     case "image": {
@@ -149,23 +142,11 @@ function DropPreview({
         </div>
       );
     }
-    case "html":
-      // Die Seite selbst, auf ein Drittel verkleinert — keine Interaktion.
-      return (
-        <div className="mini-html" aria-hidden>
-          <HtmlArtifactFrame
-            title={`${artifact.title} (Vorschau)`}
-            content={artifact.content}
-            artifactStyle={artifactStyle}
-            tabIndex={-1}
-          />
-        </div>
-      );
     case "markdown":
       return (
         <div className="mini-doc" aria-hidden>
           <div className="mini-doc-scale">
-            <MarkdownBody content={artifact.content} />
+            <MarkdownBody content={artifact.content} images={images} />
           </div>
         </div>
       );
@@ -196,7 +177,6 @@ function DropPreview({
 const KIND_LABEL: Record<Artifact["kind"], string> = {
   markdown: "Dokument",
   code: "Code",
-  html: "Seite",
   search: "Suche",
   image: "Bild",
 };
@@ -217,7 +197,6 @@ export default function PanelApp() {
     artifacts: [],
     activeId: null,
     images: {},
-    artifactStyle: "",
   });
   const [mode, setMode] = useState<Mode>("stack");
   const [qlId, setQlId] = useState<string | null>(null);
@@ -299,7 +278,7 @@ export default function PanelApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const { artifacts, images, artifactStyle } = state;
+  const { artifacts, images } = state;
   const hero = artifacts[artifacts.length - 1] ?? null;
   const older = artifacts.slice(0, -1);
   const rows = older.slice(-3);
@@ -432,7 +411,6 @@ export default function PanelApp() {
         <div className="ql-content">
           <ArtifactBody
             artifact={qlArtifact}
-            artifactStyle={artifactStyle}
             images={images}
             onImageAction={onImageAction}
           />
@@ -497,7 +475,6 @@ export default function PanelApp() {
             <DropPreview
               artifact={hero}
               images={images}
-              artifactStyle={artifactStyle}
             />
           </div>
           {/* Die Lebensader: 2px Zustandslicht, solange generiert wird. */}

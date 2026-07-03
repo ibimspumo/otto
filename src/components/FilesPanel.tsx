@@ -46,7 +46,7 @@ export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
       setDirty(false);
       if (active === "STYLE.css") {
         onStyleChanged();
-        setStatus("Gespeichert — HTML-Artefakte nutzen den neuen Style sofort.");
+        setStatus("Gespeichert — Design-Datei aktualisiert.");
       } else {
         setStatus("Gespeichert — gilt ab der nächsten Verbindung.");
       }
@@ -76,8 +76,8 @@ export default function FilesPanel({ onStyleChanged }: FilesPanelProps) {
   return (
     <section className="files-pane">
       <p className="files-sub">
-        Diese Dateien formen Ottos Persona, Gedächtnis und das Artefakt-Design
-        (STYLE.css). Werkzeuge und Systemfähigkeiten kommen aus dem App-Code. &nbsp;·&nbsp;{" "}
+        Diese Dateien formen Ottos Persona, Gedächtnis und ergänzende Designnotizen.
+        Werkzeuge und Systemfähigkeiten kommen aus dem App-Code. &nbsp;·&nbsp;{" "}
         <span className="mono">{dirPath}</span>
       </p>
 
