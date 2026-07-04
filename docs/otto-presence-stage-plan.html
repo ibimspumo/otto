@@ -1,0 +1,1318 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Otto Presence Stage - visueller Produktplan</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --page: #09090c;
+        --panel: rgba(18, 18, 22, 0.94);
+        --panel-2: rgba(28, 28, 34, 0.94);
+        --ink: rgba(255, 255, 255, 0.93);
+        --ink-2: rgba(255, 255, 255, 0.68);
+        --ink-3: rgba(255, 255, 255, 0.43);
+        --hair: rgba(255, 255, 255, 0.11);
+        --hair-2: rgba(255, 255, 255, 0.18);
+        --black: #000;
+        --violet: oklch(0.75 0.11 300);
+        --ice: oklch(0.82 0.08 220);
+        --amber: oklch(0.79 0.13 75);
+        --red: oklch(0.7 0.16 25);
+        --green: oklch(0.74 0.1 155);
+        --radius: 14px;
+        --radius-sm: 9px;
+        --shadow: 0 24px 74px rgba(0, 0, 0, 0.48);
+        --shadow-tight: 0 10px 28px rgba(0, 0, 0, 0.48);
+        --ease: cubic-bezier(0.16, 1, 0.3, 1);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 50% -18rem, rgba(255, 255, 255, 0.11), transparent 38rem),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 22rem),
+          var(--page);
+        color: var(--ink);
+        font-size: 14px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: inherit;
+        text-decoration-color: rgba(255, 255, 255, 0.28);
+        text-underline-offset: 3px;
+      }
+
+      main {
+        width: min(1220px, calc(100vw - 36px));
+        margin: 0 auto;
+        padding: 42px 0 70px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 34px;
+        align-items: end;
+        padding-bottom: 30px;
+        border-bottom: 1px solid var(--hair);
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 850px;
+        font-size: 42px;
+        line-height: 1.04;
+        letter-spacing: -0.02em;
+        text-wrap: balance;
+      }
+
+      h2 {
+        font-size: 22px;
+        line-height: 1.2;
+        letter-spacing: -0.01em;
+        text-wrap: balance;
+      }
+
+      h3 {
+        font-size: 15px;
+        line-height: 1.25;
+      }
+
+      .lede {
+        max-width: 77ch;
+        margin-top: 16px;
+        color: var(--ink-2);
+        font-size: 16px;
+      }
+
+      .meta {
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.032));
+        box-shadow: var(--shadow);
+        padding: 16px;
+      }
+
+      .meta p,
+      .note,
+      li {
+        color: var(--ink-2);
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 25px;
+        padding: 3px 9px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+
+      section {
+        margin-top: 36px;
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: end;
+        margin-bottom: 16px;
+      }
+
+      .section-head p {
+        max-width: 66ch;
+        color: var(--ink-2);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid.four {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .card {
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.057), rgba(255, 255, 255, 0.031));
+        padding: 16px;
+        min-height: 142px;
+      }
+
+      .card strong {
+        color: var(--ink);
+      }
+
+      .card p {
+        margin-top: 9px;
+        color: var(--ink-2);
+      }
+
+      .card .small {
+        color: var(--ink-3);
+        font-size: 12px;
+      }
+
+      ul {
+        margin: 11px 0 0;
+        padding-left: 18px;
+      }
+
+      li + li {
+        margin-top: 7px;
+      }
+
+      code {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 0.92em;
+        color: rgba(255, 255, 255, 0.84);
+      }
+
+      .diagnosis {
+        display: grid;
+        grid-template-columns: 0.95fr 1.05fr;
+        gap: 16px;
+      }
+
+      .screen {
+        position: relative;
+        min-height: 360px;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 22px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 70px),
+          radial-gradient(circle at 80% 14%, rgba(255, 255, 255, 0.07), transparent 220px),
+          #050506;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .screen::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 0;
+        width: 168px;
+        height: 30px;
+        transform: translateX(-50%);
+        border-radius: 0 0 18px 18px;
+        background: #000;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+
+      .island {
+        position: absolute;
+        left: 50%;
+        top: 40px;
+        width: 210px;
+        height: 44px;
+        transform: translateX(-50%);
+        border-radius: 999px;
+        background: #000;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 0 34px color-mix(in srgb, var(--ice) 30%, transparent);
+      }
+
+      .orb {
+        position: absolute;
+        top: 8px;
+        left: 12px;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle, rgba(255, 255, 255, 0.88) 0 7%, transparent 8%),
+          radial-gradient(circle, color-mix(in srgb, var(--ice) 80%, white) 0 24%, transparent 25%),
+          radial-gradient(circle, transparent 40%, color-mix(in srgb, var(--ice) 72%, transparent) 42% 54%, transparent 56%);
+        filter: drop-shadow(0 0 12px color-mix(in srgb, var(--ice) 70%, transparent));
+      }
+
+      .island span {
+        position: absolute;
+        left: 52px;
+        right: 14px;
+        top: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+
+      .app-window {
+        position: absolute;
+        inset: 92px 42px 32px;
+        border-radius: 11px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 42px),
+          #202026;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        opacity: 0.68;
+      }
+
+      .surface {
+        position: absolute;
+        border-radius: 14px;
+        background: rgba(7, 7, 9, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow: var(--shadow-tight);
+        overflow: hidden;
+      }
+
+      .surface::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.12), transparent 32%),
+          radial-gradient(circle at 86% 10%, color-mix(in srgb, var(--violet) 20%, transparent), transparent 36%);
+        opacity: 0.75;
+        pointer-events: none;
+      }
+
+      .surface .bar {
+        position: relative;
+        z-index: 2;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 10px;
+        color: var(--ink-3);
+        font-size: 11px;
+      }
+
+      .surface .body {
+        position: relative;
+        z-index: 1;
+        height: calc(100% - 32px);
+      }
+
+      .img-fill {
+        width: 100%;
+        height: 100%;
+        background:
+          radial-gradient(circle at 34% 33%, rgba(255, 255, 255, 0.92), transparent 9%),
+          linear-gradient(145deg, #28313b, #0b0b0d 58%, #252029);
+      }
+
+      .search-fill {
+        padding: 10px;
+      }
+
+      .hit {
+        height: 44px;
+        margin-bottom: 8px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.055);
+      }
+
+      .term-fill {
+        padding: 10px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.58);
+      }
+
+      .line {
+        height: 10px;
+        margin-bottom: 6px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.13);
+      }
+
+      .drop-stack {
+        position: absolute;
+        left: 22px;
+        bottom: 22px;
+        width: 128px;
+      }
+
+      .drop-mini {
+        height: 38px;
+        margin-top: 7px;
+        border-radius: 9px;
+        background: #060608;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+      }
+
+      .old .single-ql {
+        left: 50%;
+        top: 112px;
+        width: 360px;
+        height: 210px;
+        transform: translateX(-50%);
+      }
+
+      .old .drop-stack {
+        opacity: 0.26;
+      }
+
+      .new .ref-img {
+        left: 36px;
+        top: 118px;
+        width: 300px;
+        height: 212px;
+      }
+
+      .new .research {
+        right: 36px;
+        top: 104px;
+        width: 320px;
+        height: 238px;
+      }
+
+      .new .activity {
+        left: 365px;
+        bottom: 36px;
+        width: 260px;
+        height: 86px;
+      }
+
+      .aura {
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        box-shadow:
+          inset 0 0 0 2px color-mix(in srgb, var(--violet) 42%, transparent),
+          inset 0 0 34px color-mix(in srgb, var(--violet) 18%, transparent);
+        opacity: 0.82;
+      }
+
+      .caption {
+        position: absolute;
+        left: 50%;
+        bottom: 12px;
+        transform: translateX(-50%);
+        color: var(--ink-3);
+        font-size: 11px;
+      }
+
+      .storyboard {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .frame {
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.035);
+        padding: 12px;
+      }
+
+      .frame-art {
+        position: relative;
+        height: 132px;
+        border-radius: 12px;
+        background: #050506;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        overflow: hidden;
+      }
+
+      .frame h3 {
+        margin-top: 10px;
+      }
+
+      .frame p {
+        margin-top: 6px;
+        color: var(--ink-2);
+        font-size: 12.5px;
+      }
+
+      .mini-island {
+        position: absolute;
+        left: 50%;
+        top: 10px;
+        width: 74px;
+        height: 20px;
+        transform: translateX(-50%);
+        border-radius: 999px;
+        background: #000;
+        box-shadow: 0 0 18px color-mix(in srgb, var(--violet) 32%, transparent);
+      }
+
+      .mini-card {
+        position: absolute;
+        border-radius: 9px;
+        background: rgba(8, 8, 10, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.13);
+      }
+
+      .f1 .mini-card {
+        left: 14px;
+        bottom: 12px;
+        width: 70px;
+        height: 50px;
+      }
+
+      .f2 .mini-card {
+        left: 14px;
+        top: 42px;
+        width: 92px;
+        height: 70px;
+      }
+
+      .f2 .mini-card:nth-child(3) {
+        left: 116px;
+        width: 100px;
+      }
+
+      .f3 .mini-card {
+        left: 12px;
+        top: 40px;
+        width: 86px;
+        height: 74px;
+      }
+
+      .f3 .mini-card:nth-child(3) {
+        left: 108px;
+        top: 30px;
+        width: 118px;
+        height: 90px;
+        box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--violet) 76%, transparent);
+      }
+
+      .f4 .mini-card {
+        left: 18px;
+        top: 38px;
+        width: 86px;
+        height: 82px;
+      }
+
+      .f4 .mini-card:nth-child(3) {
+        left: 114px;
+        top: 38px;
+        width: 86px;
+        height: 82px;
+      }
+
+      .flow {
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        background: rgba(255, 255, 255, 0.035);
+        padding: 16px;
+      }
+
+      .flow-row {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .flow-step {
+        min-height: 96px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.26);
+        padding: 12px;
+        position: relative;
+      }
+
+      .flow-step::after {
+        content: "";
+        position: absolute;
+        right: -8px;
+        top: 50%;
+        width: 6px;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.28);
+      }
+
+      .flow-step:last-child::after {
+        display: none;
+      }
+
+      .flow-step span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink-2);
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+
+      .flow-step p {
+        color: var(--ink-2);
+        font-size: 12.5px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        border: 1px solid var(--hair);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      th,
+      td {
+        padding: 12px 13px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        vertical-align: top;
+        text-align: left;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      th {
+        color: var(--ink);
+        font-size: 12px;
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      td {
+        color: var(--ink-2);
+        font-size: 13px;
+      }
+
+      .phase {
+        display: grid;
+        grid-template-columns: 110px 1fr 1fr;
+        gap: 14px;
+        border-top: 1px solid var(--hair);
+        padding: 16px 0;
+      }
+
+      .phase:first-child {
+        border-top: 0;
+      }
+
+      .phase .tag {
+        width: max-content;
+        height: 27px;
+        padding: 4px 9px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+
+      .sources {
+        color: var(--ink-3);
+        font-size: 12px;
+      }
+
+      .sources li {
+        color: var(--ink-3);
+      }
+
+      @media (max-width: 980px) {
+        header,
+        .diagnosis,
+        .grid.two,
+        .grid,
+        .grid.four {
+          grid-template-columns: 1fr;
+        }
+
+        .storyboard,
+        .flow-row {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .phase {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        main {
+          width: min(100vw - 24px, 1220px);
+          padding-top: 24px;
+        }
+
+        h1 {
+          font-size: 31px;
+        }
+
+        .storyboard,
+        .flow-row {
+          grid-template-columns: 1fr;
+        }
+
+        .screen {
+          min-height: 320px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Otto muss von einem Panel zu einer lebenden Presence Stage werden.</h1>
+          <p class="lede">
+            Die aktuelle UI ist fast da, aber sie denkt noch in einem einzigen Ergebnisfenster.
+            Der Zielzustand ist keine groessere App, sondern ein intelligentes Bildschirm-Layer:
+            Otto darf mehrere Dinge gleichzeitig zeigen, sie raeumlich ordnen, im Vordergrund
+            halten, wiederfinden und per Sprache kontrollieren.
+          </p>
+          <div class="pill-row">
+            <span class="pill">Voice-first</span>
+            <span class="pill">Mehrere Surfaces</span>
+            <span class="pill">Persistente Artefakte</span>
+            <span class="pill">Leiser Wow-Effekt</span>
+            <span class="pill">Mehr Autonomie</span>
+          </div>
+        </div>
+        <aside class="meta">
+          <h3>Recherche- und Codebasis</h3>
+          <p>
+            Grundlage: Ottos aktueller Tauri/React-Code, Projektprinzipien, Hermes- und
+            OpenClaw-Dokumentation, Tauri-Fenster-APIs und Apples Live-Activity-Denke.
+          </p>
+          <div class="pill-row">
+            <span class="pill">Stand: 4. Juli 2026</span>
+            <span class="pill">Plan-Artefakt</span>
+          </div>
+        </aside>
+      </header>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>1. Diagnose: Das Problem ist kein Styling, sondern Topologie.</h2>
+          </div>
+          <p>
+            Otto hat schon gute Materialien: Insel, Drops, Quick Look, Bildstudio, Job-Terminal.
+            Aber fast alles lebt in einem einzigen nativen Panel-Fenster.
+          </p>
+        </div>
+
+        <div class="diagnosis">
+          <div class="screen old">
+            <div class="app-window"></div>
+            <div class="island"><div class="orb"></div><span>generiert ein Bild...</span></div>
+            <div class="surface single-ql">
+              <div class="bar">Quick Look · ein Modus</div>
+              <div class="body"><div class="img-fill"></div></div>
+            </div>
+            <div class="drop-stack">
+              <div class="drop-mini"></div>
+              <div class="drop-mini"></div>
+              <div class="drop-mini"></div>
+            </div>
+            <div class="caption">Heute: ein Panel, ein Modus, ein grosses Artefakt</div>
+          </div>
+
+          <div class="screen new">
+            <div class="aura"></div>
+            <div class="app-window"></div>
+            <div class="island"><div class="orb"></div><span>recherchiert Referenzen...</span></div>
+            <div class="surface ref-img">
+              <div class="bar">Referenz · Bild bleibt sichtbar</div>
+              <div class="body"><div class="img-fill"></div></div>
+            </div>
+            <div class="surface research">
+              <div class="bar">Recherche · Quellen rechts</div>
+              <div class="body search-fill">
+                <div class="hit"></div>
+                <div class="hit"></div>
+                <div class="hit"></div>
+              </div>
+            </div>
+            <div class="surface activity">
+              <div class="bar">Aktivitaet · leise, nicht als Ergebnis</div>
+              <div class="body term-fill">
+                <div class="line"></div>
+                <div class="line" style="width: 72%"></div>
+                <div class="line" style="width: 54%"></div>
+              </div>
+            </div>
+            <div class="caption">Ziel: mehrere koordinierte Surfaces in einer Szene</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>2. Produktprinzip: Artefakt, Surface und Szene trennen.</h2>
+          </div>
+          <p>
+            Der wichtigste Architekturwechsel: Was Otto erzeugt, was Otto zeigt und was gerade
+            zusammengehoert, sind drei verschiedene Dinge.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Artifact</h3>
+            <p>
+              Dauerhafter Inhalt: Markdown, Bild, Suche, Job-Ausgabe, Galerieauswahl.
+              Hat Titel, Typ, Kurzfassung unter 100 Zeichen, Quellen, Eltern/Kind-Beziehungen
+              und Persistenzstatus.
+            </p>
+            <p class="small">Heute: `Artifact` ist fluechtig im React-State, Bilder sind persistent.</p>
+          </article>
+          <article class="card">
+            <h3>Surface</h3>
+            <p>
+              Sichtbare Praesentation eines Artefakts: Fokusbild, linke Referenz, rechte Recherche,
+              Aktivitaetsleiste, Bildstudio, Vergleichsansicht. Eine Surface kann geschlossen
+              werden, ohne das Artifact zu vergessen.
+            </p>
+            <p class="small">Neu: mehrere native Fenster oder ein Window pro Surface.</p>
+          </article>
+          <article class="card">
+            <h3>Scene</h3>
+            <p>
+              Der aktuelle Arbeitskontext: "Google-Logo suchen und ins Bild fusionieren" ist eine
+              Szene mit altem Bild, Websuche, importierter Referenz, neuem Bild und Vergleich.
+            </p>
+            <p class="small">Neu: Otto kann "das von eben" raeumlich und semantisch verstehen.</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>3. Das neue Fensterverhalten: Companion Layer statt normales Fenster.</h2>
+          </div>
+          <p>
+            Wenn Otto aktiv mit dem Nutzer arbeitet, sollen seine Arbeitsflaechen ueber normalen
+            App-Fenstern bleiben, ohne permanent Tastaturfokus zu stehlen.
+          </p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Surface-Typ</th>
+              <th>Fenster-Level</th>
+              <th>Fokus</th>
+              <th>Warum</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Insel</td>
+              <td>Immer oben, alle Spaces</td>
+              <td>Kein Fokus beim Summon</td>
+              <td>Otto ist Systemschicht, keine App, die dem Nutzer die Tastatur klaut.</td>
+            </tr>
+            <tr>
+              <td>Aktive Arbeits-Surface</td>
+              <td>Companion: oben waehrend Session</td>
+              <td>Fokussierbar nur nach Klick</td>
+              <td>Ein Bild oder Dossier verschwindet nicht, nur weil der Nutzer Safari anklickt.</td>
+            </tr>
+            <tr>
+              <td>Referenz-Surface</td>
+              <td>Oben, aber kleiner / an Rand</td>
+              <td>Nicht fokussierend</td>
+              <td>Bleibt sichtbar als Material, blockiert aber nicht die eigentliche Arbeit.</td>
+            </tr>
+            <tr>
+              <td>Aktivitaet / Job</td>
+              <td>Ambient, klein, nur bei Bedarf gross</td>
+              <td>Nicht fokussierend</td>
+              <td>Terminal-Laeufe sind Transparenz, aber nicht jedes Kommando ist ein Ergebnis.</td>
+            </tr>
+            <tr>
+              <td>Aura Frame</td>
+              <td>Click-through Overlay</td>
+              <td>Nie</td>
+              <td>Zeigt "Otto arbeitet mit dir", ohne Klicks zu fressen.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>4. Motion-Sprache: magisch, aber nicht laut.</h2>
+          </div>
+          <p>
+            Kein permanenter Regenbogenrahmen. Besser: ein duennes, click-through Licht am
+            Bildschirmrand, das Ottos drei Zustandsfarben als lebende Systemreaktion benutzt.
+          </p>
+        </div>
+
+        <div class="storyboard">
+          <article class="frame">
+            <div class="frame-art f1">
+              <div class="mini-island"></div>
+              <div class="mini-card"></div>
+            </div>
+            <h3>Materialisieren</h3>
+            <p>Neue Ergebnisse kommen als echte Miniatur aus der Kante, nicht als Toast.</p>
+          </article>
+          <article class="frame">
+            <div class="frame-art f2">
+              <div class="mini-island"></div>
+              <div class="mini-card"></div>
+              <div class="mini-card"></div>
+            </div>
+            <h3>Aufraeumen</h3>
+            <p>Wenn eine Recherche startet, weicht das Bild weich nach links aus und bleibt Referenz.</p>
+          </article>
+          <article class="frame">
+            <div class="frame-art f3">
+              <div class="mini-island"></div>
+              <div class="mini-card"></div>
+              <div class="mini-card"></div>
+            </div>
+            <h3>Arbeiten</h3>
+            <p>Die aktive Surface hat eine 2px-Lebensader. Jobs erscheinen als leise Aktivitaets-Beads.</p>
+          </article>
+          <article class="frame">
+            <div class="frame-art f4">
+              <div class="mini-island"></div>
+              <div class="mini-card"></div>
+              <div class="mini-card"></div>
+            </div>
+            <h3>Vergleichen</h3>
+            <p>Nach Bildbearbeitung entsteht automatisch Vorher/Nachher statt "neues Bild ersetzt altes".</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>5. Beispiel-Workflow: Bild + Websuche + Fusion.</h2>
+          </div>
+          <p>
+            Das ist der Kernfall aus deiner Beschreibung. Otto soll nicht umschalten, sondern eine
+            kleine Arbeitsbuehne bauen.
+          </p>
+        </div>
+        <div class="flow">
+          <div class="flow-row">
+            <div class="flow-step">
+              <span>1</span>
+              <h3>Bild fertig</h3>
+              <p>Bild ist Fokus-Surface. Artifact wird persistent mit Prompt und Kurzfassung gespeichert.</p>
+            </div>
+            <div class="flow-step">
+              <span>2</span>
+              <h3>Neue Aufgabe</h3>
+              <p>"Such das Google-Logo" erzeugt eine Szene. Das Bild wird Referenz links.</p>
+            </div>
+            <div class="flow-step">
+              <span>3</span>
+              <h3>Recherche rechts</h3>
+              <p>Websuche, Quellen, Bildtreffer und ggf. URL-Extraktion laufen in einer rechten Surface.</p>
+            </div>
+            <div class="flow-step">
+              <span>4</span>
+              <h3>Import + Bearbeitung</h3>
+              <p>Ausgewaehlte Quelle wird importiert, parent_ids verknuepfen Referenz und Ursprungsbild.</p>
+            </div>
+            <div class="flow-step">
+              <span>5</span>
+              <h3>Vergleich</h3>
+              <p>Otto zeigt Vorher/Nachher. Die Recherche zieht sich als Quellenbeleg in die Szene zurueck.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>6. Was unten links noch hingehoert und was nicht.</h2>
+          </div>
+          <p>
+            Der alte Drop-Stapel wird zur Recents Shelf: ein wiederholbarer, sprachadressierbarer
+            Verlauf. Nicht jeder Tool-Lauf ist ein Drop.
+          </p>
+        </div>
+        <div class="grid four">
+          <article class="card">
+            <h3>Ja: fertige Inhalte</h3>
+            <p>Bilder, Dokumente, Dossiers, Quellenflaechen, Code, Bildgruppen, Vergleichsansichten.</p>
+          </article>
+          <article class="card">
+            <h3>Ja: laufende Generierung</h3>
+            <p>Solange etwas entsteht, bleibt es sichtbar und laeuft nicht ab.</p>
+          </article>
+          <article class="card">
+            <h3>Nein: jedes Kommando</h3>
+            <p>Shell-/Computer-Use-Aktivitaet ist ein Activity Bead, ausser der Nutzer will zuschauen.</p>
+          </article>
+          <article class="card">
+            <h3>Nie doppelt</h3>
+            <p>Dedup ueber `artifactId`, `imageId`, `jobId`, `sceneId`; Galerie ist ein Surface-Typ, kein Titel-Hack.</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>7. Persistenz: Otto darf Artefakte nicht nur anzeigen, sondern kennen.</h2>
+          </div>
+          <p>
+            Bilder sind schon persistent. Die naechste Stufe ist ein lokales Artefakt-Journal fuer
+            alles, was Otto erzeugt oder als Ergebnis verwendet.
+          </p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Daten</th>
+              <th>Speicherung</th>
+              <th>Neue Tools</th>
+              <th>Sprachbeispiele</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Artifact-Manifest</td>
+              <td>SQLite-Tabelle `artifacts` + optional Datei-Body</td>
+              <td>`search_artifacts`, `open_artifact`, `summarize_artifact`</td>
+              <td>"Zeig mir das Logo-Bild von gestern."</td>
+            </tr>
+            <tr>
+              <td>Kurzfassung</td>
+              <td>`summary` unter 100 Zeichen, automatisch bei Fertigstellung</td>
+              <td>`list_recent_artifacts`</td>
+              <td>"Was hast du heute alles erstellt?"</td>
+            </tr>
+            <tr>
+              <td>Lineage</td>
+              <td>`parent_artifact_ids`, `source_urls`, `operation`</td>
+              <td>`show_lineage`</td>
+              <td>"Nimm nochmal das Ausgangsbild, nicht die bearbeitete Version."</td>
+            </tr>
+            <tr>
+              <td>Scene-Zusammenhang</td>
+              <td>`scene_id`, `intent`, `last_surface_roles`</td>
+              <td>`resume_scene`</td>
+              <td>"Mach mit dem Projekt von vorhin weiter."</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>8. Galerie: weniger Programm, mehr sprachgesteuerte Bibliothek.</h2>
+          </div>
+          <p>
+            Die Galerie darf anklickbar bleiben, aber nicht aussehen, als sei Klicken der Hauptweg.
+            Sichtbare Bedienelemente werden zu Hover-Details; Nummern, Namen und Kontext werden
+            fuer Sprache optimiert.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Sprachanker statt Buttons</h3>
+            <p>
+              Jede Kachel bekommt eine dezente Nummer und einen kurzen Namen. Aktionen wie
+              "favorisieren", "loeschen", "gross", "in Ordner schieben" muessen per Stimme
+              natuerlich funktionieren.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Ordner als Projektkontexte</h3>
+            <p>
+              Ordner bleiben, aber die UI nennt sie weniger "Ordner" und mehr "Projekt" oder
+              "Serie". Neue Bilder landen automatisch im aktiven Kontext.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Lineage sichtbar</h3>
+            <p>
+              Statt Favorit-/Groesser-Buttons im Vordergrund: eine ruhige Verlaufsspur "Original
+              -> Referenz -> Bearbeitung", die Otto sprachlich referenzieren kann.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>9. Autonomie: Ottos Recherche darf nicht nach einer Suche aufgeben.</h2>
+          </div>
+          <p>
+            Hermes und OpenClaw machen nicht nur einen Prompt laenger. Sie trennen Toolsets,
+            Skills, Memory und Runtime-Fakten sauber, und sie geben dem Agenten klare Eskalationswege.
+          </p>
+        </div>
+        <div class="grid two">
+          <article class="card">
+            <h3>Recherche-Leiter</h3>
+            <ul>
+              <li>Schnelle aktuelle Frage: `web_search` mit 8-12 Treffern, ggf. `news`.</li>
+              <li>Wenn Snippets unklar sind: neues Tool `web_fetch` / `read_url` fuer Seiteninhalt.</li>
+              <li>Wenn Seiten interaktiv sind: `computer_use` / Browser-Surface.</li>
+              <li>Wenn es wirklich gruendlich sein soll: `research_task` oder Delegation.</li>
+              <li>Antwort immer mit Standdatum, Quellen und konkreter Unsicherheit.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <h3>Neue Default-Regel</h3>
+            <p>
+              Otto darf nicht sagen "das aendert sich oft, kann ich nicht sagen", wenn aktuelle
+              Tools verfuegbar sind. Besser: "Ich pruefe es live" und dann mindestens eine
+              Selbstkorrektur-Runde, bevor er den Nutzer fragt.
+            </p>
+              <p>
+                Fuer WM-/Spielplan-Fragen: Suche, offizielle Quelle bevorzugen, zweite Quelle
+                gegenpruefen, Datum nennen.
+              </p>
+              <p>
+                Wenn ein Tool in den Einstellungen deaktiviert ist, soll Otto das wissen: nicht
+                still weniger koennen, sondern kurz sagen koennen, welche Faehigkeit gerade fehlt.
+              </p>
+            </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>10. Technischer Zielzuschnitt.</h2>
+          </div>
+          <p>
+            Der Umbau kann inkrementell passieren, ohne Ottos bestehendes Materialsystem wegzuwerfen.
+          </p>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Modul</th>
+              <th>Heute</th>
+              <th>Ziel</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>`hudWindow.ts`</td>
+              <td>Ein `panel` wird fuer Stack, Quick Look, Studio und Tab umgebaut.</td>
+              <td>`createSurfaceWindow`, `layoutSurface`, `layoutScene`, `setCompanionLevel`.</td>
+            </tr>
+            <tr>
+              <td>`PanelApp.tsx`</td>
+              <td>Lokaler `mode` entscheidet, was das einzige Panel zeigt.</td>
+              <td>`ShelfApp` nur fuer Recents; neue `SurfaceApp` pro Surface.</td>
+            </tr>
+            <tr>
+              <td>`App.tsx`</td>
+              <td>Besitzt `artifacts[]` und oeffnet Panel automatisch.</td>
+              <td>Besitzt `artifacts`, `surfaces`, `scenes`; Presentation Policy entscheidet.</td>
+            </tr>
+            <tr>
+              <td>`types.ts`</td>
+              <td>`Artifact` kombiniert Inhalt und Praesentationsreste.</td>
+              <td>`ArtifactRecord`, `SurfaceRecord`, `SceneRecord`, `ArtifactLineage`.</td>
+            </tr>
+            <tr>
+              <td>Rust/Tauri</td>
+              <td>Drei statische Fenster in `tauri.conf.json`.</td>
+              <td>Dynamische WebviewWindows plus AppKit-Helfer fuer Level, Workspace, Vibrancy.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>11. Umsetzungsphasen.</h2>
+          </div>
+          <p>
+            So wird aus dem Plan ein risikoarmer Umbau statt ein Big Bang.
+          </p>
+        </div>
+        <div class="card">
+          <div class="phase">
+            <div><span class="tag">Phase 0</span></div>
+            <div>
+              <h3>Sofort-Fixes</h3>
+              <p>Insel-Glow-Clipping beheben; Quick Look waehrend aktiver Session wieder oben halten; `open_image` deduplizieren; Job-Drops anders klassifizieren.</p>
+            </div>
+            <div>
+              <p class="note">Klein, aber fuehlbar: Bilder verschwinden nicht mehr hinter Apps.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div><span class="tag">Phase 1</span></div>
+            <div>
+              <h3>Stage-State einfuehren</h3>
+              <p>`surfaces[]` und `scenes[]` in `App.tsx`, noch auf dem alten Panel gerendert.</p>
+            </div>
+            <div>
+              <p class="note">Erst Semantik stabilisieren, dann Fenster vervielfaeltigen.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div><span class="tag">Phase 2</span></div>
+            <div>
+              <h3>Mehrere Surface-Fenster</h3>
+              <p>Stack bleibt eigenes Shelf; Quick Look, Recherche, Studio und Job-Viewer werden eigene Fenster.</p>
+            </div>
+            <div>
+              <p class="note">Der Bild+Recherche-Fall wird erstmals richtig.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div><span class="tag">Phase 3</span></div>
+            <div>
+              <h3>Aura Frame und Motion</h3>
+              <p>Click-through Licht am Rand, Rollenwechsel-Animationen, Vorher/Nachher-Compare.</p>
+            </div>
+            <div>
+              <p class="note">Wow-Effekt, aber in Ottos monochromer Lichtlogik.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div><span class="tag">Phase 4</span></div>
+            <div>
+              <h3>Artefakt-Journal</h3>
+              <p>Persistente Artefakte, Kurzfassungen, Suche, Wiederaufnahme, Lineage.</p>
+            </div>
+            <div>
+              <p class="note">Otto kann spaeter wieder auf Ergebnisse zugreifen.</p>
+            </div>
+          </div>
+          <div class="phase">
+            <div><span class="tag">Phase 5</span></div>
+            <div>
+              <h3>Autonomie-Haertung</h3>
+              <p>`web_fetch`, Recherche-Leiter, Recovery-Regeln, deaktivierte-Faehigkeiten-Hinweise, besseres Prompt-Layering und Skill-Feedback.</p>
+            </div>
+            <div>
+              <p class="note">Otto wird spuerbar hilfreicher, nicht nur huebscher.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>12. Offene Produktentscheidungen.</h2>
+          </div>
+          <p>
+            Das sind die wenigen Fragen, die wir bewusst entscheiden sollten, bevor Code entsteht.
+          </p>
+        </div>
+        <div class="grid">
+          <article class="card">
+            <h3>Companion-Level als Default?</h3>
+            <p>
+              Empfehlung: Ja, aber nur solange Otto aktiv ist oder ein Nutzer explizit etwas
+              sichtbar halten will. Nach Inaktivitaet ziehen Surfaces in die Shelf zurueck.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Wie stark darf der Aura Frame sein?</h3>
+            <p>
+              Empfehlung: sehr duenn, 2-4 px, nur Zustandslicht. Kein permanenter Regenbogen.
+              Kurze spektrale Ueberblendung nur bei Materialisierung.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Was wird dauerhaft gespeichert?</h3>
+            <p>
+              Empfehlung: jedes fertige Nutzer-Artefakt ja; rohe Job-Zeilen nur verdichtet;
+              transiente technische Kommandos nein.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Insel-Glow darf nie clippen</h3>
+            <p>
+              Der Screenshot zeigt: Schatten/Glow oben in der Leiste wird hart abgeschnitten,
+              wenn die reale Fensterhoehe nur die Pille umfasst. Regel: entweder Glow innerhalb
+              der echten Fensterflaeche zeichnen oder den Schatten komplett reduzieren. Keine
+              halb abgeschnittenen Lichtkanten.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h2>Quellen und Code-Anker.</h2>
+          </div>
+          <p>
+            Die externen Quellen stuetzen vor allem Prompt-/Memory-/Tooling-Architektur und
+            Fenster-Faehigkeiten; die Produktentscheidungen bleiben Otto-spezifisch.
+          </p>
+        </div>
+        <div class="grid two">
+          <article class="card sources">
+            <h3>Externe Recherche</h3>
+            <ul>
+              <li><a href="https://docs.openclaw.ai/concepts/system-prompt">OpenClaw System Prompt</a>: Prompt wird pro Run aus Schichten gebaut.</li>
+              <li><a href="https://docs.openclaw.ai/concepts/context">OpenClaw Context</a>: Tools, Skills-Metadaten, Runtime und Workspace-Kontext getrennt.</li>
+              <li><a href="https://docs.openclaw.ai/concepts/memory">OpenClaw Memory</a>: MEMORY.md, Tagesnotizen, Dreaming als klare Speicherrollen.</li>
+              <li><a href="https://hermes-agent.nousresearch.com/docs/developer-guide/prompt-assembly">Hermes Prompt Assembly</a>: SOUL, Tool-Guidance, Memory als Prompt-Layer.</li>
+              <li><a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/tools">Hermes Tools</a>: breite Toolsets fuer Web, Browser, Terminal, Memory, Delegation.</li>
+              <li><a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/computer-use">Hermes Computer Use</a>: Hintergrund-Computer-Use ohne Fokus-/Cursor-Klau als Designziel.</li>
+              <li><a href="https://v2.tauri.app/reference/javascript/api/namespacewindow/">Tauri Window API</a>: `setAlwaysOnTop`, `focusable`, WindowOptions.</li>
+              <li><a href="https://docs.rs/tauri/latest/tauri/window/struct.Window.html">Tauri Rust Window</a>: `set_always_on_top`, `set_visible_on_all_workspaces`.</li>
+            </ul>
+          </article>
+          <article class="card sources">
+            <h3>Lokale Code-Anker</h3>
+            <ul>
+              <li>`src/lib/hudWindow.ts`: `layoutQuickLook` setzt heute `setAlwaysOnTop(false)`.</li>
+              <li>`src/PanelApp.tsx`: ein `mode`, ein `qlId`, ein Panel.</li>
+              <li>`src/hooks/usePanelSync.ts`: synchronisiert alle Artefakte in ein Panel-Fenster.</li>
+              <li>`src/App.tsx`: `addArtifact`, `addJobArtifact`, `finishCliJob`, Bild-/Galerie-Tools.</li>
+              <li>`src/lib/tools.ts`: Prompt-Preamble kennt semantische Platzierung, aber keine echte Multi-Surface-Stage.</li>
+              <li>`src-tauri/tauri.conf.json`: statische Fenster `main`, `panel`, `settings`.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

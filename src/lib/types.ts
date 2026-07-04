@@ -164,10 +164,14 @@ export interface Artifact {
   id: string;
   title: string;
   kind: ArtifactKind;
+  summary?: string;
   content: string;
   language?: string;
   results?: SearchResult[];
   imageIds?: string[];
+  sourceUrls?: string[];
+  parentIds?: string[];
+  createdAt?: number;
   updatedAt: number;
   /** Gläserne Jobs: Live-Terminal eines Jobs als Artefakt. */
   jobId?: string;
@@ -176,6 +180,89 @@ export interface Artifact {
   /** Letzte Output-Zeilen (Ringpuffer) für Mini- und Vollansicht. */
   jobLines?: string[];
   exitCode?: number | null;
+}
+
+export interface ArtifactJournalEntry {
+  id: string;
+  title: string;
+  kind: ArtifactKind;
+  /** Kurzfassung für Listen/Journalflächen; serverseitig auf 100 Zeichen begrenzt. */
+  summary: string;
+  content: string;
+  language?: string | null;
+  results?: SearchResult[] | null;
+  imageIds: string[];
+  sourceUrls: string[];
+  parentIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  jobId?: string | null;
+  jobAgent?: string | null;
+  jobStatus?: JobStatus | null;
+  jobLines?: string[] | null;
+  exitCode?: number | null;
+}
+
+export type ArtifactJournalUpsertInput = Omit<
+  ArtifactJournalEntry,
+  "summary" | "createdAt" | "updatedAt" | "imageIds" | "sourceUrls" | "parentIds"
+> &
+  Partial<
+    Pick<
+      ArtifactJournalEntry,
+      "summary" | "createdAt" | "updatedAt" | "imageIds" | "sourceUrls" | "parentIds"
+    >
+  >;
+
+export interface ArtifactJournalListOptions {
+  limit?: number;
+  offset?: number;
+  kind?: ArtifactKind;
+  query?: string;
+}
+
+export type SurfaceRole =
+  | "focus"
+  | "reference"
+  | "research"
+  | "activity"
+  | "gallery"
+  | "compare";
+
+export type SurfacePlacement =
+  | "center"
+  | "leftShelf"
+  | "rightShelf"
+  | "bottomCenter";
+
+export interface SurfaceRecord {
+  id: string;
+  role: SurfaceRole;
+  placement: SurfacePlacement;
+  artifactId?: string;
+  artifactIds?: string[];
+  title: string;
+  sceneId?: string;
+  size: "normal" | "large" | "compact";
+  pinned: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SceneRecord {
+  id: string;
+  title: string;
+  surfaceIds: string[];
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SurfaceStatePayload {
+  surface: SurfaceRecord;
+  artifacts: Artifact[];
+  images: Record<string, ImageState>;
+  imageFolders: ImageFolder[];
 }
 
 export interface TranscriptItem {

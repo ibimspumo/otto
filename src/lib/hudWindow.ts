@@ -18,6 +18,7 @@ import {
   type Monitor,
 } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import type { SurfacePlacement } from "./types";
 
 async function anyMonitor(): Promise<Monitor | null> {
   return (await currentMonitor()) ?? (await primaryMonitor());
@@ -73,12 +74,13 @@ export type IslandMode = "compact" | "wide";
 // Fenstermaße (logische Punkte). Die Kapsel sitzt am oberen Fensterrand,
 // darunter bleibt Luft, in die das Zustandslicht ausstrahlen kann.
 const ISLAND_SIZE: Record<IslandMode, { w: number; h: number }> = {
-  compact: { w: 52, h: 52 },
-  wide: { w: 560, h: 56 },
+  compact: { w: 64, h: 76 },
+  wide: { w: 572, h: 78 },
 };
 
 /** Abstand der Pille zur Unterkante von Notch/Menüleiste. */
 const ISLAND_GAP = 6;
+const ISLAND_VISUAL_TOP = 10;
 
 // Höhe von Notch/Menüleiste (Safe Area) — einmal pro Laufzeit aus AppKit.
 let topInsetCache: number | null = null;
@@ -107,7 +109,9 @@ export async function layoutIsland(mode: IslandMode): Promise<void> {
     const w = Math.round(ISLAND_SIZE[mode].w * sf);
     const h = Math.round(ISLAND_SIZE[mode].h * sf);
     const x = Math.round(monitor.position.x + (monitor.size.width - w) / 2);
-    const y = Math.round(monitor.position.y + (inset + ISLAND_GAP) * sf);
+    const y = Math.round(
+      monitor.position.y + (inset + ISLAND_GAP - ISLAND_VISUAL_TOP) * sf,
+    );
     await win.setSize(new PhysicalSize(w, h));
     await win.setPosition(new PhysicalPosition(x, y));
   } catch {
@@ -285,6 +289,116 @@ export async function layoutImageStudio(): Promise<void> {
     await panel.setFocus();
   } catch {
     // Ignorieren.
+  }
+}
+
+// ------------------------------------------------------------------
+// Presence Stage — mehrere Surface-Fenster statt ein Panel-Modus
+// ------------------------------------------------------------------
+
+function surfaceLabel(id: string): string {
+  return `surface-${id}`;
+}
+
+async function surfaceWindow(id: string): Promise<WebviewWindow | null> {
+  return WebviewWindow.getByLabel(surfaceLabel(id));
+}
+
+export async function ensureSurfaceWindow(id: string): Promise<WebviewWindow | null> {
+  try {
+    const label = surfaceLabel(id);
+    const existing = await WebviewWindow.getByLabel(label);
+    if (existing) return existing;
+    const win = new WebviewWindow(label, {
+      url: `index.html?surface=${encodeURIComponent(id)}`,
+      title: "Otto",
+      width: 720,
+      height: 560,
+      resizable: false,
+      decorations: false,
+      transparent: true,
+      shadow: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      visibleOnAllWorkspaces: true,
+      acceptFirstMouse: true,
+      focus: false,
+      focusable: true,
+      visible: false,
+    });
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      win.once("tauri://created", done);
+      win.once("tauri://error", done);
+      setTimeout(done, 350);
+    });
+    return win;
+  } catch {
+    return null;
+  }
+}
+
+export async function closeSurfaceWindow(id: string): Promise<void> {
+  try {
+    await surfaceWindow(id).then((win) => win?.close());
+  } catch {
+    // Ignorieren.
+  }
+}
+
+export async function layoutSurface(
+  id: string,
+  wantW: number,
+  wantH: number,
+  placement: SurfacePlacement = "center",
+  size: "normal" | "large" | "compact" = "normal",
+): Promise<{ w: number; h: number }> {
+  const fallback = { w: wantW, h: wantH };
+  try {
+    const win = await ensureSurfaceWindow(id);
+    const monitor = await activeMonitor();
+    if (!win || !monitor) return fallback;
+    const sf = monitor.scaleFactor;
+    const area = workArea(monitor);
+    const usableW = area.right - area.left;
+    const usableH = area.bottom - area.top;
+    const isShelf = placement === "leftShelf" || placement === "rightShelf";
+    const maxW =
+      placement === "bottomCenter"
+        ? Math.min(720, usableW * 0.62)
+        : isShelf
+          ? Math.min(760, Math.max(460, usableW * 0.48))
+          : usableW * (size === "large" ? 0.96 : 0.84);
+    const maxH =
+      placement === "bottomCenter"
+        ? Math.min(220, usableH * 0.28)
+        : usableH * (size === "large" ? 0.94 : 0.86);
+    const { w, h } = fitWithin(wantW, wantH, maxW, maxH);
+    const x =
+      placement === "rightShelf"
+        ? area.right - w
+        : placement === "leftShelf"
+          ? area.left
+          : area.x + (area.w - w) / 2;
+    const y =
+      placement === "bottomCenter"
+        ? area.bottom - h
+        : placement === "center"
+          ? Math.max(area.top, area.y + (area.h - h) / 2 - 12)
+          : area.top + Math.max(0, (usableH - h) / 2);
+    await invoke("window_vibrancy", {
+      label: surfaceLabel(id),
+      enable: true,
+      radius: QL_RADIUS,
+    }).catch(() => {});
+    await win.setShadow(false).catch(() => {});
+    await win.setSize(new PhysicalSize(Math.round(w * sf), Math.round(h * sf)));
+    await win.setPosition(new PhysicalPosition(Math.round(x * sf), Math.round(y * sf)));
+    await win.setAlwaysOnTop(true).catch(() => {});
+    await win.show();
+    return { w, h };
+  } catch {
+    return fallback;
   }
 }
 

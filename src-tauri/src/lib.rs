@@ -1,4 +1,5 @@
 mod agent_files;
+mod artifacts;
 mod cli;
 mod computer_use;
 mod context;
@@ -89,10 +90,16 @@ pub fn run() {
             agent_files::read_agent_file,
             agent_files::write_agent_file,
             agent_files::agent_dir_path,
+            artifacts::artifact_journal_upsert,
+            artifacts::artifact_journal_get,
+            artifacts::artifact_journal_list,
+            artifacts::artifact_journal_delete,
             search::brave_search,
+            search::web_fetch,
             diagnostics::app_diagnostics,
             diagnostics::request_accessibility,
             terminal::run_terminal,
+            window_effects::window_vibrancy,
             window_effects::panel_vibrancy,
             logging::log_line,
             native::top_inset,

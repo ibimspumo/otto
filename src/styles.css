@@ -139,6 +139,7 @@ button {
   align-items: center;
   position: relative;
   overflow: hidden;
+  padding-top: 10px;
   /* Das eine farbige Element der ganzen UI. */
   --light: transparent;
   transition: --light 420ms ease;
@@ -172,9 +173,7 @@ button {
   background: var(--black);
   border: 1px solid var(--hair);
   border-radius: 999px;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 12px 34px rgba(0, 0, 0, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transition:
     width var(--dur-med) var(--ease-system),
     border-color var(--dur-fast) ease,
@@ -364,21 +363,7 @@ button {
 }
 
 .island-glow {
-  position: absolute;
-  top: 30px;
-  width: 212px;
-  height: 58px;
-  border-radius: 999px;
-  background:
-    radial-gradient(ellipse at center, color-mix(in srgb, var(--light) 42%, transparent), transparent 72%);
-  opacity: 0.62;
-  filter: blur(18px);
-  transform: translateY(8px);
-  pointer-events: none;
-  transition:
-    opacity var(--dur-med) ease,
-    width var(--dur-med) var(--ease-system);
-  animation: system-breathe 2.8s ease-in-out infinite;
+  display: none;
 }
 
 .island.wide + .island-glow {
@@ -389,11 +374,11 @@ button {
   0%,
   100% {
     opacity: 0.48;
-    transform: translateY(8px) scaleX(0.96);
+    transform: translateY(4px) scaleX(0.96);
   }
   50% {
     opacity: 0.72;
-    transform: translateY(9px) scaleX(1);
+    transform: translateY(5px) scaleX(1);
   }
 }
 
@@ -891,6 +876,160 @@ button {
   }
   50% {
     opacity: 0.95;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Presence Stage — eigenständige Surface-Fenster                      */
+/* ------------------------------------------------------------------ */
+
+.surface-shell {
+  height: 100vh;
+  width: 100vw;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--glass-tint);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 50px rgba(0, 0, 0, 0.42);
+  animation: surface-in 360ms var(--ease-system);
+  isolation: isolate;
+}
+
+.surface-shell.loading {
+  background: transparent;
+  box-shadow: none;
+}
+
+.surface-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 255, 255, 0.12), transparent 30%),
+    radial-gradient(circle at 88% 10%, color-mix(in srgb, var(--violet) 18%, transparent), transparent 36%);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.surface-shell.role-reference,
+.surface-shell.role-activity {
+  background: rgba(8, 8, 11, 0.82);
+}
+
+.surface-shell.role-research::after,
+.surface-shell.role-activity::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--violet), transparent);
+  background-size: 200% 100%;
+  animation: life 1.7s linear infinite;
+  opacity: 0.88;
+  pointer-events: none;
+}
+
+.surface-bar {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  background: linear-gradient(to bottom, var(--glass-tint-strong), transparent);
+}
+
+.surface-role {
+  flex: none;
+  min-width: 0;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.surface-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.surface-content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+}
+
+.surface-empty {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+}
+
+.surface-compare {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--hair);
+}
+
+.compare-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.compare-label {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  left: 10px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.68);
+  border: 1px solid var(--hair);
+  color: var(--ink-2);
+  font-size: 11px;
+  backdrop-filter: blur(12px);
+}
+
+@keyframes surface-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .surface-shell {
+    animation: none;
   }
 }
 

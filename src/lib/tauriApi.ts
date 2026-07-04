@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ArtifactJournalEntry,
+  ArtifactJournalListOptions,
+  ArtifactJournalUpsertInput,
   CliDonePayload,
   CodexComputerUseStatus,
   Diagnostics,
@@ -149,6 +152,45 @@ export const braveSearch = (
     count,
     searchType,
   });
+
+export interface WebFetchResult {
+  url: string;
+  final_url: string;
+  status: number;
+  content_type: string;
+  title?: string | null;
+  text: string;
+  text_chars: number;
+  returned_chars: number;
+  bytes_read: number;
+  truncated: boolean;
+  body_truncated: boolean;
+  limit_bytes: number;
+  limit_chars: number;
+}
+
+export const webFetch = (url: string, maxChars?: number) =>
+  invoke<WebFetchResult>("web_fetch", { url, maxChars });
+
+// --- Artefakt-Journal (lokale Persistenz, keine Stage-UI) ---
+
+export const artifactJournalUpsert = (entry: ArtifactJournalUpsertInput) =>
+  invoke<ArtifactJournalEntry>("artifact_journal_upsert", { entry });
+
+export const artifactJournalGet = (id: string) =>
+  invoke<ArtifactJournalEntry | null>("artifact_journal_get", { id });
+
+export const artifactJournalList = (opts: ArtifactJournalListOptions = {}) => {
+  const args: Record<string, unknown> = {};
+  if (opts.limit !== undefined) args.limit = opts.limit;
+  if (opts.offset !== undefined) args.offset = opts.offset;
+  if (opts.kind !== undefined) args.kind = opts.kind;
+  if (opts.query !== undefined) args.query = opts.query;
+  return invoke<ArtifactJournalEntry[]>("artifact_journal_list", args);
+};
+
+export const artifactJournalDelete = (id: string) =>
+  invoke<boolean>("artifact_journal_delete", { id });
 
 // --- Session-Persistenz (SQLite + FTS5) ---
 

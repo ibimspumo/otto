@@ -2,9 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the island, drops and settings windows",
-  "windows": ["main", "panel", "settings"],
+  "windows": ["main", "panel", "settings", "surface-*"],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-create",
+    "core:window:allow-close",
     "opener:default",
     "core:window:allow-start-dragging",
     "core:window:allow-show",

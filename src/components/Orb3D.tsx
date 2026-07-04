@@ -223,7 +223,8 @@ export default function Orb3D({
     const particles = new THREE.Points(particleGeo, particleMat);
     if (!coreOnly) scene.add(particles);
 
-    // Weicher Glow hinter allem
+    // Weicher Glow nur fuer die grosse Buehne. In der Insel wirkt der
+    // Sprite-Halo wie ein abgeschnittener Fensterschatten.
     const glowTex = makeGlowTexture();
     const glowMat = new THREE.SpriteMaterial({
       map: glowTex,
@@ -238,7 +239,7 @@ export default function Orb3D({
     const glowBase = coreOnly ? 2.3 : 3.9;
     glow.scale.setScalar(glowBase + 0.1);
     glow.position.z = -0.5;
-    scene.add(glow);
+    if (!coreOnly) scene.add(glow);
 
     let raf = 0;
     let t = 0;

@@ -570,10 +570,7 @@ export default function PanelApp() {
   }, [qlArtifact, selectedImageId]);
 
   const openQuickLook = (a: Artifact) => {
-    setQlId(a.id);
-    setQlSize("normal");
-    setMode(isGalleryArtifact(a) ? "studio" : "quicklook");
-    void emit("panel-action", { type: "select", id: a.id });
+    void emit("panel-action", { type: "present", id: a.id });
   };
 
   const dismissDrop = (id: string) => {

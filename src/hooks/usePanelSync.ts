@@ -30,6 +30,7 @@ interface UsePanelSyncArgs {
   setActiveArtifactId: Dispatch<SetStateAction<string | null>>;
   setSettings: Dispatch<SetStateAction<Settings | null>>;
   closeArtifact: (id: string) => boolean;
+  presentArtifact: (mode: "gross" | "riesig" | "klein", id?: string) => void;
   handleImageAction: (id: string, action: ImageAction) => Promise<void>;
   handleOpenImage: (id: string) => void;
   handleGalleryFolder: (folderId: string | null) => void;
@@ -69,6 +70,7 @@ export function usePanelSync({
   setActiveArtifactId,
   setSettings,
   closeArtifact,
+  presentArtifact,
   handleImageAction,
   handleOpenImage,
   handleGalleryFolder,
@@ -111,7 +113,7 @@ export function usePanelSync({
     });
     const unClose = listen("panel-close", () => setPanelOpen(false));
     const unAction = listen<{
-      type: "select" | "close" | "image" | "open-image" | "gallery-folder";
+      type: "select" | "present" | "close" | "image" | "open-image" | "gallery-folder";
       id?: string;
       action?: "favorite" | "delete" | "save";
       folderId?: string | null;
@@ -119,6 +121,9 @@ export function usePanelSync({
       const p = e.payload;
       if (p.type === "select" && p.id) {
         setActiveArtifactId(p.id);
+      } else if (p.type === "present" && p.id) {
+        setActiveArtifactId(p.id);
+        presentArtifact("gross", p.id);
       } else if (p.type === "close" && p.id) {
         closeArtifact(p.id);
       } else if (p.type === "image" && p.id && p.action) {
@@ -150,6 +155,7 @@ export function usePanelSync({
     setActiveArtifactId,
     setSettings,
     closeArtifact,
+    presentArtifact,
     handleImageAction,
     handleOpenImage,
     handleGalleryFolder,

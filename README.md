@@ -84,5 +84,5 @@ ab Werk aus und die Aktivierung läuft über den Hotkey.
 ---
 
 <sub>Für Entwickler: Otto ist eine Tauri-2-App (React + Rust). Details zu
-Architektur und Entwicklung stehen in [CLAUDE.md](CLAUDE.md) — Entwicklung mit
+Architektur und Entwicklung stehen in [AGENTS.md](AGENTS.md) — Entwicklung mit
 `npm run tauri dev`, Releases entstehen per Git-Tag über GitHub Actions.</sub>

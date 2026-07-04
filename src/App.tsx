@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { AudioEngine } from "./lib/audio";
-import { showSettings } from "./lib/hudWindow";
+import { closeSurfaceWindow, ensureSurfaceWindow, showSettings } from "./lib/hudWindow";
 import {
   flushSession,
   MEMORY_BUDGET_CHARS,
@@ -32,12 +32,15 @@ import type {
   AgentState,
   Artifact,
   ArtifactKind,
+  ArtifactJournalUpsertInput,
   CliDonePayload,
   CliJob,
   ImageFolder,
   ImageMeta,
   ImageState,
   Settings,
+  SurfacePlacement,
+  SurfaceRecord,
   TranscriptItem,
 } from "./lib/types";
 import Island from "./components/Island";
@@ -148,10 +151,137 @@ function memoryNoticeLabel(notice: MemoryNotice): string {
   }
 }
 
+type PresentMode = "gross" | "riesig" | "klein";
+
+function surfacePlacementForArtifact(a: Artifact): SurfacePlacement {
+  if (a.kind === "search") return "rightShelf";
+  if (a.kind === "job") return "bottomCenter";
+  return "center";
+}
+
+function surfaceRoleForArtifact(a: Artifact): SurfaceRecord["role"] {
+  if (a.kind === "search") return "research";
+  if (a.kind === "job") return "activity";
+  if (a.kind === "image" && a.title.startsWith("Galerie")) return "gallery";
+  return "focus";
+}
+
+function clampArtifactSummary(text: string, max = 100): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  return `${clean.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function artifactSummary(a: Artifact): string {
+  if (a.summary?.trim()) return clampArtifactSummary(a.summary);
+  if (a.kind === "search") {
+    const count = a.results?.length ?? 0;
+    return clampArtifactSummary(`${count} Treffer zu ${a.content || a.title}`);
+  }
+  if (a.kind === "job") {
+    const agent = a.jobAgent ?? "Job";
+    const status = a.jobStatus ?? "running";
+    return clampArtifactSummary(`${agent} ${status}: ${a.content || a.title}`);
+  }
+  return clampArtifactSummary(a.content || a.title);
+}
+
+function artifactSourceUrls(a: Artifact): string[] {
+  const urls = new Set<string>();
+  for (const url of a.sourceUrls ?? []) {
+    if (/^https?:\/\//i.test(url)) urls.add(url);
+  }
+  for (const r of a.results ?? []) {
+    if (/^https?:\/\//i.test(r.url)) urls.add(r.url);
+  }
+  for (const match of a.content.matchAll(/https?:\/\/[^\s)\]"'<>]+/gi)) {
+    urls.add(match[0].replace(/[.,;:!?]+$/, ""));
+  }
+  return [...urls].slice(0, 40);
+}
+
+function journalEntryFromArtifact(a: Artifact): ArtifactJournalUpsertInput {
+  return {
+    id: a.id,
+    title: a.title,
+    kind: a.kind,
+    summary: artifactSummary(a),
+    content: a.content,
+    language: a.language ?? null,
+    results: a.results ?? null,
+    imageIds: a.imageIds ?? [],
+    sourceUrls: artifactSourceUrls(a),
+    parentIds: a.parentIds ?? [],
+    createdAt: a.createdAt ?? a.updatedAt,
+    updatedAt: a.updatedAt,
+    jobId: a.jobId ?? null,
+    jobAgent: a.jobAgent ?? null,
+    jobStatus: a.jobStatus ?? null,
+    jobLines: a.jobLines ?? null,
+    exitCode: a.exitCode ?? null,
+  };
+}
+
+function persistChangedArtifacts(previous: Artifact[], next: Artifact[]) {
+  const prevUpdated = new Map(previous.map((a) => [a.id, a.updatedAt]));
+  for (const artifact of next) {
+    if (prevUpdated.get(artifact.id) === artifact.updatedAt) continue;
+    void api
+      .artifactJournalUpsert(journalEntryFromArtifact(artifact))
+      .catch((e) => void api.logLine(`artifact journal upsert failed: ${String(e)}`));
+  }
+}
+
+function imagesForSurface(
+  surface: SurfaceRecord,
+  artifacts: Artifact[],
+  images: Record<string, ImageState>,
+): Record<string, ImageState> {
+  const ids = new Set<string>();
+  const candidates = [
+    surface.artifactId,
+    ...(surface.artifactIds ?? []),
+  ].filter(Boolean) as string[];
+  for (const artifactId of candidates) {
+    const artifact = artifacts.find((a) => a.id === artifactId);
+    if (!artifact) continue;
+    for (const id of artifact.imageIds ?? []) ids.add(id);
+    if (artifact.kind === "markdown" && artifact.content.includes("otto-image:")) {
+      for (const id of Object.keys(images)) {
+        if (artifact.content.includes(`otto-image:${id}`)) ids.add(id);
+      }
+    }
+  }
+  const out: Record<string, ImageState> = {};
+  ids.forEach((id) => {
+    if (images[id]) out[id] = images[id];
+  });
+  return out;
+}
+
+function surfaceReferencesArtifact(surface: SurfaceRecord, artifactId: string): boolean {
+  return (
+    surface.artifactId === artifactId ||
+    (surface.artifactIds?.includes(artifactId) ?? false)
+  );
+}
+
+function surfaceHasMissingArtifact(
+  surface: SurfaceRecord,
+  liveArtifactIds: Set<string>,
+): boolean {
+  const ids = [
+    surface.artifactId,
+    ...(surface.artifactIds ?? []),
+  ].filter(Boolean) as string[];
+  return ids.some((id) => !liveArtifactIds.has(id));
+}
+
 export default function App() {
   const [agentState, setAgentState] = useState<AgentState>("disconnected");
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
+  const [surfaces, setSurfaces] = useState<SurfaceRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
 
@@ -175,6 +305,9 @@ export default function App() {
   const [imageFolders, setImageFolders] = useState<ImageFolder[]>([]);
   const imageFoldersRef = useRef<ImageFolder[]>([]);
   const activeImageFolderIdRef = useRef<string | null>(null);
+  const handleImageActionRef = useRef<
+    ((id: string, action: "favorite" | "delete" | "save") => Promise<void>) | null
+  >(null);
   const [update, setUpdate] = useState<Update | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
 
@@ -204,10 +337,12 @@ export default function App() {
   }
   const panelOpenRef = useRef(false);
   const activeArtifactIdRef = useRef<string | null>(null);
+  const surfacesRef = useRef<SurfaceRecord[]>([]);
   useEffect(() => {
     panelOpenRef.current = panelOpen;
     activeArtifactIdRef.current = activeArtifactId;
-  }, [panelOpen, activeArtifactId]);
+    surfacesRef.current = surfaces;
+  }, [panelOpen, activeArtifactId, surfaces]);
 
   /**
    * Otto zeigt etwas: Der Drop-Stapel erscheint unten links — unaufdringlich,
@@ -222,25 +357,216 @@ export default function App() {
     setPanelOpen(false);
   }, []);
 
-  // Quick Look per Stimme: wirkt exakt wie ein Klick auf den Drop.
-  // War das Fenster zu, wird der Wunsch vorgemerkt und nach dem
-  // panel-open-Event eingelöst (sonst würde der fresh-Reset ihn schlucken).
-  type PresentMode = "gross" | "riesig" | "klein";
+  const commitSurfaces = useCallback((next: SurfaceRecord[]) => {
+    surfacesRef.current = next;
+    setSurfaces(next);
+  }, []);
+
+  const closeSurface = useCallback(
+    (surfaceId: string) => {
+      const next = surfacesRef.current.filter((s) => s.id !== surfaceId);
+      commitSurfaces(next);
+      void closeSurfaceWindow(surfaceId);
+    },
+    [commitSurfaces],
+  );
+
+  const closeAllSurfaces = useCallback(() => {
+    const closing = surfacesRef.current;
+    if (closing.length === 0) return;
+    commitSurfaces([]);
+    closing.forEach((s) => void closeSurfaceWindow(s.id));
+  }, [commitSurfaces]);
+
+  const closeSurfacesForArtifact = useCallback(
+    (artifactId?: string) => {
+      const closing = artifactId
+        ? surfacesRef.current.filter((s) => surfaceReferencesArtifact(s, artifactId))
+        : surfacesRef.current.slice(-1);
+      if (closing.length === 0) return;
+      const closingIds = new Set(closing.map((s) => s.id));
+      commitSurfaces(surfacesRef.current.filter((s) => !closingIds.has(s.id)));
+      closing.forEach((s) => void closeSurfaceWindow(s.id));
+    },
+    [commitSurfaces],
+  );
+
+  const openSurfaceForArtifact = useCallback(
+    (artifactId: string, mode: Exclude<PresentMode, "klein"> = "gross") => {
+      const artifact = artifactsRef.current.find((a) => a.id === artifactId);
+      if (!artifact) return;
+      const now = Date.now();
+      const role = surfaceRoleForArtifact(artifact);
+      const placement = surfacePlacementForArtifact(artifact);
+      const size = mode === "riesig" ? "large" : "normal";
+      const existing = surfacesRef.current.find(
+        (s) => s.artifactId === artifactId && s.role !== "compare",
+      );
+      let next = surfacesRef.current.map((s) => {
+        if (role === "research" && s.role === "focus") {
+          return {
+            ...s,
+            role: "reference" as const,
+            placement: "leftShelf" as const,
+            size: "compact" as const,
+            updatedAt: now,
+          };
+        }
+        if (role === "focus" && s.role === "focus" && s.artifactId !== artifactId) {
+          return {
+            ...s,
+            role: "reference" as const,
+            placement: "leftShelf" as const,
+            size: "compact" as const,
+            updatedAt: now,
+          };
+        }
+        return s;
+      });
+      if (existing) {
+        next = next.map((s) =>
+          s.id === existing.id
+            ? {
+                ...s,
+                title: artifact.title,
+                role,
+                placement,
+                size,
+                updatedAt: now,
+              }
+            : s,
+        );
+        commitSurfaces(next);
+        void ensureSurfaceWindow(existing.id);
+        return;
+      }
+      const surface: SurfaceRecord = {
+        id: `s${++seq.current}`,
+        role,
+        placement,
+        artifactId,
+        title: artifact.title,
+        size,
+        pinned: role === "reference" || role === "research",
+        createdAt: now,
+        updatedAt: now,
+      };
+      commitSurfaces([...next, surface]);
+      void ensureSurfaceWindow(surface.id);
+    },
+    [commitSurfaces],
+  );
+
+  const openCompareSurface = useCallback(
+    (artifactIds: string[], title = "Vorher / Nachher") => {
+      if (artifactIds.length < 2) return;
+      const now = Date.now();
+      const existing = surfacesRef.current.find(
+        (s) =>
+          s.role === "compare" &&
+          s.artifactIds?.join("|") === artifactIds.join("|"),
+      );
+      if (existing) {
+        commitSurfaces(
+          surfacesRef.current.map((s) =>
+            s.id === existing.id ? { ...s, title, updatedAt: now } : s,
+          ),
+        );
+        void ensureSurfaceWindow(existing.id);
+        return;
+      }
+      const surface: SurfaceRecord = {
+        id: `s${++seq.current}`,
+        role: "compare",
+        placement: "center",
+        artifactIds,
+        title,
+        size: "normal",
+        pinned: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      commitSurfaces([
+        ...surfacesRef.current.filter((s) => s.role !== "compare"),
+        surface,
+      ]);
+      void ensureSurfaceWindow(surface.id);
+    },
+    [commitSurfaces],
+  );
+
+  // Stage-Präsentation per Stimme: große Inhalte werden echte Surface-
+  // Fenster, der Drop-Stapel bleibt als Recents-Shelf sichtbar.
   const pendingPresent = useRef<{ mode: PresentMode; id?: string } | null>(
     null,
   );
-  const presentArtifact = useCallback((mode: PresentMode, id?: string) => {
-    if (mode === "klein") {
-      void emit("panel-present", { mode });
-      return;
+  const presentArtifact = useCallback(
+    (mode: PresentMode, id?: string) => {
+      if (mode === "klein") {
+        closeSurfacesForArtifact(id);
+        openArtifacts();
+        return;
+      }
+      const artifactId = id ?? artifactsRef.current[artifactsRef.current.length - 1]?.id;
+      if (!artifactId) return;
+      openSurfaceForArtifact(artifactId, mode);
+      openArtifacts();
+    },
+    [closeSurfacesForArtifact, openArtifacts, openSurfaceForArtifact],
+  );
+
+  useEffect(() => {
+    for (const surface of surfaces) {
+      void emit("surface-state", {
+        surface,
+        artifacts,
+        images: imagesForSurface(surface, artifacts, images),
+        imageFolders,
+      });
     }
-    if (panelOpenRef.current) {
-      void emit("panel-present", { mode, id });
-    } else {
-      pendingPresent.current = { mode, id };
-      setPanelOpen(true);
-    }
-  }, []);
+  }, [surfaces, artifacts, images, imageFolders]);
+
+  useEffect(() => {
+    const unReady = listen<{ id: string }>("surface-ready", (e) => {
+      const surface = surfacesRef.current.find((s) => s.id === e.payload.id);
+      if (!surface) return;
+      void emit("surface-state", {
+        surface,
+        artifacts: artifactsRef.current,
+        images: imagesForSurface(surface, artifactsRef.current, imagesRef.current),
+        imageFolders: imageFoldersRef.current,
+      });
+    });
+    const unAction = listen<{
+      type: "close" | "image";
+      surfaceId: string;
+      id?: string;
+      action?: "favorite" | "delete" | "save";
+    }>("surface-action", (e) => {
+      const p = e.payload;
+      if (p.type === "close") {
+        closeSurface(p.surfaceId);
+      } else if (p.type === "image" && p.id && p.action) {
+        void handleImageActionRef.current?.(p.id, p.action);
+      }
+    });
+    return () => {
+      unReady.then((f) => f());
+      unAction.then((f) => f());
+    };
+  }, [closeSurface]);
+
+  useEffect(() => {
+    if (surfaces.length === 0) return;
+    const liveArtifactIds = new Set(artifacts.map((a) => a.id));
+    const staleSurfaces = surfaces.filter((s) =>
+      surfaceHasMissingArtifact(s, liveArtifactIds),
+    );
+    if (staleSurfaces.length === 0) return;
+    const staleIds = new Set(staleSurfaces.map((s) => s.id));
+    commitSurfaces(surfaces.filter((s) => !staleIds.has(s.id)));
+    staleSurfaces.forEach((s) => void closeSurfaceWindow(s.id));
+  }, [artifacts, commitSurfaces, surfaces]);
 
   const levels = useRef({ inp: 0, out: 0 });
   const engineRef = useRef<AudioEngine | null>(null);
@@ -535,18 +861,24 @@ export default function App() {
   // ----------------------------------------------------------------
 
   const commitArtifacts = useCallback((next: Artifact[], activeId?: string) => {
+    const previous = artifactsRef.current;
     artifactsRef.current = next;
     setArtifacts(next);
     if (activeId) setActiveArtifactId(activeId);
+    persistChangedArtifacts(previous, next);
   }, []);
 
   const addArtifact = useCallback(
     (partial: Omit<Artifact, "id" | "updatedAt">): string => {
-      const id = `a${++seq.current}`;
-      commitArtifacts(
-        [...artifactsRef.current, { ...partial, id, updatedAt: Date.now() }],
+      const now = Date.now();
+      const id = `art-${now.toString(36)}-${++seq.current}`;
+      const artifact = {
+        ...partial,
         id,
-      );
+        createdAt: partial.createdAt ?? now,
+        updatedAt: now,
+      };
+      commitArtifacts([...artifactsRef.current, artifact], id);
       // Otto zeigt etwas: das Panel-Fenster öffnet sich von selbst.
       openArtifacts();
       return id;
@@ -835,13 +1167,14 @@ export default function App() {
       const next = artifactsRef.current.filter((a) => a.id !== id);
       if (next.length === before) return false;
       commitArtifacts(next);
+      closeSurfacesForArtifact(id);
       setActiveArtifactId((prev) =>
         prev === id ? (next[next.length - 1]?.id ?? null) : prev,
       );
       if (next.length === 0) closeArtifactsPanel();
       return true;
     },
-    [closeArtifactsPanel, commitArtifacts],
+    [closeArtifactsPanel, closeSurfacesForArtifact, commitArtifacts],
   );
 
   const removeImageEverywhere = useCallback(
@@ -860,6 +1193,17 @@ export default function App() {
         )
         .filter((a) => !(a.kind === "image" && (a.imageIds?.length ?? 0) === 0));
       commitArtifacts(nextArts);
+      const liveArtifactIds = new Set(nextArts.map((a) => a.id));
+      const staleSurfaces = surfacesRef.current.filter(
+        (s) =>
+          (s.artifactId && !liveArtifactIds.has(s.artifactId)) ||
+          (s.artifactIds?.some((artifactId) => !liveArtifactIds.has(artifactId)) ?? false),
+      );
+      if (staleSurfaces.length > 0) {
+        const staleIds = new Set(staleSurfaces.map((s) => s.id));
+        commitSurfaces(surfacesRef.current.filter((s) => !staleIds.has(s.id)));
+        staleSurfaces.forEach((s) => void closeSurfaceWindow(s.id));
+      }
       setActiveArtifactId((prev) =>
         nextArts.some((a) => a.id === prev)
           ? prev
@@ -867,11 +1211,11 @@ export default function App() {
       );
       if (nextArts.length === 0) closeArtifactsPanel();
     },
-    [closeArtifactsPanel, commitArtifacts],
+    [closeArtifactsPanel, commitArtifacts, commitSurfaces],
   );
 
-  const handleImageAction = useCallback(
-    async (id: string, action: "favorite" | "delete" | "save") => {
+	  const handleImageAction = useCallback(
+	    async (id: string, action: "favorite" | "delete" | "save") => {
       try {
         if (action === "delete") {
           await api.imageDelete(id);
@@ -891,23 +1235,32 @@ export default function App() {
         setError(String(e));
       }
     },
-    [pushActivity, removeImageEverywhere, setImage],
-  );
+	    [pushActivity, removeImageEverywhere, setImage],
+	  );
 
-  const handleOpenImage = useCallback(
-    (id: string) => {
-      const st = imagesRef.current[id];
-      const meta = st?.meta;
-      if (!meta) return;
-      const artifactId = addArtifact({
-        title: meta.name,
-        kind: "image",
-        content: meta.prompt,
-        imageIds: [meta.id],
-      });
-      presentArtifact("gross", artifactId);
-      pushActivity(`öffnet Bild „${meta.name}“`);
-    },
+  useEffect(() => {
+    handleImageActionRef.current = handleImageAction;
+  }, [handleImageAction]);
+
+	  const handleOpenImage = useCallback(
+	    (id: string) => {
+	      const st = imagesRef.current[id];
+	      const meta = st?.meta;
+	      if (!meta) return;
+      const existing = artifactsRef.current.find(
+        (a) => a.kind === "image" && a.imageIds?.length === 1 && a.imageIds[0] === meta.id,
+      );
+	      const artifactId =
+        existing?.id ??
+        addArtifact({
+          title: meta.name,
+          kind: "image",
+          content: meta.prompt,
+          imageIds: [meta.id],
+        });
+	      presentArtifact("gross", artifactId);
+	      pushActivity(`öffnet Bild „${meta.name}“`);
+	    },
     [addArtifact, presentArtifact, pushActivity],
   );
 
@@ -1097,7 +1450,35 @@ export default function App() {
               next_step:
                 searchType === "images" || searchType === "videos"
                   ? "Die Treffer werden dem Nutzer bereits visuell gezeigt — fasse mündlich knapp zusammen."
-                  : "Erstelle jetzt ein Markdown-Artefakt mit create_artifact(kind=\"markdown\", present=true), das die Recherche auswertet, strukturiert und Quellen verlinkt. Nutze Tabellen, klare Abschnitte und bei Bedarf Mermaid-Diagramme.",
+                  : "Wähle jetzt die 1-3 wichtigsten/verlässlichsten URLs aus, lies sie mit web_fetch und erstelle danach ein Markdown-Artefakt mit create_artifact(kind=\"markdown\", present=true), das die Recherche auswertet, strukturiert und Quellen verlinkt.",
+            };
+            break;
+          }
+          case "web_fetch": {
+            const url = String(args.url ?? "").trim();
+            if (!/^https?:\/\//i.test(url)) {
+              out = {
+                ok: false,
+                error: "web_fetch kann nur vollständige http:// oder https:// URLs abrufen.",
+              };
+              break;
+            }
+            let label = url;
+            try {
+              label = new URL(url).hostname || url;
+            } catch {
+              // Rust validiert die URL endgültig; hier ist nur die Aktivitätszeile.
+            }
+            pushActivity(`liest Quelle: ${label}`);
+            const res = await api.webFetch(
+              url,
+              typeof args.max_chars === "number" ? args.max_chars : undefined,
+            );
+            out = {
+              ok: true,
+              ...res,
+              next_step:
+                "Nutze diesen Seiteninhalt als geprüfte Quelle. Wenn noch wichtige Perspektiven fehlen, rufe gezielt 1-2 weitere URLs mit web_fetch ab; danach erstelle ein Markdown-Artefakt mit Quellenlinks und klarer Einordnung.",
             };
             break;
           }
@@ -1123,6 +1504,7 @@ export default function App() {
             if (id === "all") {
               commitArtifacts([]);
               setActiveArtifactId(null);
+              closeAllSurfaces();
               closeArtifactsPanel();
               pushActivity("schließt alle Artefakte");
               out = { ok: true };
@@ -1603,12 +1985,13 @@ export default function App() {
             // size sofort mitgeben: Quick Look kennt so die Aspect Ratio,
             // bevor das erste Pixel da ist.
             ids.forEach((id) => setImage(id, { status: "generating", size }));
-            addArtifact({
-              title: baseName,
-              kind: "image",
-              content: prompt,
-              imageIds: ids,
-            });
+	            const artifactId = addArtifact({
+	              title: baseName,
+	              kind: "image",
+	              content: prompt,
+	              imageIds: ids,
+	            });
+            presentArtifact("gross", artifactId);
 
             const storeOne = async (id: string, i: number, b64: string) => {
               const meta = await api.imageStore(
@@ -1821,12 +2204,33 @@ export default function App() {
             ids.forEach((id) =>
               setImage(id, { status: "generating", size: size ?? base.size }),
             );
-            addArtifact({
-              title: baseName,
-              kind: "image",
-              content: prompt,
-              imageIds: ids,
-            });
+            const baseArtifactId =
+              bases.length === 1
+                ? (artifactsRef.current.find(
+                    (a) =>
+                      a.kind === "image" &&
+                      a.imageIds?.length === 1 &&
+                      a.imageIds[0] === base.id,
+                  )?.id ??
+                  addArtifact({
+                    title: base.name,
+                    kind: "image",
+                    content: base.prompt,
+                    imageIds: [base.id],
+                  }))
+                : null;
+	            const artifactId = addArtifact({
+	              title: baseName,
+	              kind: "image",
+	              content: prompt,
+	              imageIds: ids,
+                parentIds: bases.map((b) => b.id),
+	            });
+            if (baseArtifactId) {
+              openCompareSurface([baseArtifactId, artifactId], `${base.name} -> ${baseName}`);
+            } else {
+              presentArtifact("gross", artifactId);
+            }
 
             try {
               const baseB64s = await Promise.all(
@@ -2305,6 +2709,7 @@ export default function App() {
       clearActivity,
       closeArtifact,
       closeArtifactsPanel,
+      closeAllSurfaces,
       commitArtifacts,
       commitJobs,
       newImageId,
@@ -2532,7 +2937,18 @@ export default function App() {
       const yoloInfo = current.yolo_mode
         ? `\n\n--- YOLO-Modus AKTIV ---\nDer Nutzer hat den vollen Systemzugriff freigeschaltet. run_terminal und delegate_task haben KEINE Befehls-Beschränkungen mehr: destruktive Befehle, Downloads, Datei-Umleitungen, Prozess-Steuerung usw. sind alle erlaubt — du arbeitest mit den vollen Rechten des angemeldeten Nutzers, wie in einem normalen Terminal. Echtes root gibt es nur mit sudo und Passwort (nicht-interaktiv nicht möglich). Nutze die Macht verantwortungsvoll: Führe zerstörerische oder weitreichende Befehle (löschen, überschreiben, Systemänderungen) nur auf klare Anweisung aus und fasse vorher kurz zusammen, was du tun wirst.`
         : "";
-      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${notesInfo}${skillsInfo}${galleryInfo}${cliInfo}${computerUseInfo}${yoloInfo}`;
+      const disabledAbilities = [
+        !current.terminal_enabled ? "run_terminal/Shell ist in den Einstellungen deaktiviert" : null,
+        !current.cli_enabled ? "delegate_task/Codex-/Claude-CLI-Delegation ist deaktiviert" : null,
+        !current.codex_computer_use_enabled ? "computer_use/Mac-GUI-Steuerung ist deaktiviert" : null,
+        !current.openrouter_api_key?.trim() ? "OpenRouter-Key fehlt (Dokumentanalyse und viele OpenRouter-Modelle nicht nutzbar)" : null,
+        !current.brave_api_key?.trim() ? "Brave-Websuche ist nicht konfiguriert" : null,
+      ].filter(Boolean);
+      const disabledInfo =
+        disabledAbilities.length > 0
+          ? `\n\n--- Deaktivierte oder fehlende Fähigkeiten ---\n${disabledAbilities.map((x) => `- ${x}`).join("\n")}\nWenn eine Aufgabe daran scheitert, sage knapp, welche Fähigkeit fehlt und welche Alternative du nutzen kannst.`
+          : "";
+      const instructions = `${INSTRUCTIONS_PREAMBLE}\n\n${parts.join("\n\n")}${notesInfo}${skillsInfo}${galleryInfo}${cliInfo}${computerUseInfo}${disabledInfo}${yoloInfo}`;
 
       const client = new RealtimeClient({
         onOpen: () => {
@@ -2736,6 +3152,7 @@ export default function App() {
     setActiveArtifactId,
     setSettings,
     closeArtifact,
+    presentArtifact,
     handleImageAction,
     handleOpenImage,
     handleGalleryFolder,
